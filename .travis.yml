@@ -5,7 +5,8 @@ language: python
 python:
   - "3.6"
   - "3.7"
-
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 cache: pip
 addons:
   apt:
