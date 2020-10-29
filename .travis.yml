@@ -25,7 +25,8 @@ addons:
     - ninja-build
 
 install: tests/travis-install.sh
-
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 script:
   - python setup.py build_cython || travis_terminate 1
   - python setup.py build_ext --inplace || travis_terminate 1
