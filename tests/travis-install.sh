@@ -18,7 +18,7 @@ ls -d1 /usr/local/lib/*-linux-gnu | sudo tee /etc/ld.so.conf.d/usrlocal.conf
 sudo ldconfig
 
 pip install https://github.com/rogerbinns/apsw/releases/download/3.8.2-r1/apsw-3.8.2-r1.zip
-pip install https://github.com/r0ps3c/coveralls-python/archive/fix-rebuilds.zip
+pip install https://github.com/r0ps3c/coveralls-python/archive/fix-rebuilds2.zip
 
 
 # We're pinning most packages to specific versions to prevent the CI from failing when
