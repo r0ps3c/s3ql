@@ -18,7 +18,6 @@ ls -d1 /usr/local/lib/*-linux-gnu | sudo tee /etc/ld.so.conf.d/usrlocal.conf
 sudo ldconfig
 
 pip install https://github.com/rogerbinns/apsw/releases/download/3.8.2-r1/apsw-3.8.2-r1.zip
-pip install https://github.com/r0ps3c/coveralls-python/archive/fix-rebuilds2.zip
 
 # We're pinning most packages to specific versions to prevent the CI from failing when
 # testing eg merge requests because some of those packages have started emitting
@@ -35,7 +34,8 @@ pip install defusedxml \
             "dugong >= 3.4, < 4.0" \
             "pytest >= 4.6.5, < 5.0.0" \
             "pytest_trio == 0.6.0" \
-            "trio == 0.15"
+            "trio == 0.15" \
+            coveralls
 
 echo "Current libsqlite3-dev version: $(dpkg-query --show --showformat='${Version}' libsqlite3-dev)"
 
