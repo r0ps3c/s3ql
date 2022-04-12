@@ -198,11 +198,12 @@ class Fsck(object):
             if match:
                 inode = int(match.group(1))
                 blockno = int(match.group(2))
-            elif re.match(r'^(\\d+)-(\\d+)\.tmp$', filename):
+            elif re.match('^(\\d+)-(\\d+)\\.tmp$', filename):
                 # Temporary file created when downloading object
                 self.found_errors = True
                 self.log_error("Removing leftover temporary file: " + filename)
                 os.unlink(os.path.join(self.cachedir, filename))
+                continue
             else:
                 raise RuntimeError('Strange file in cache directory: %s' % filename)
 
@@ -927,9 +928,10 @@ class Fsck(object):
         if not isinstance(plain_backend, LocalBackend):
             return
 
-        log.info('Checking for temporary objects (backend)...')
+        log.info('Checking for temporary objects and empty directories (backend)...')
 
-        for (path, dirnames, filenames) in os.walk(plain_backend.prefix, topdown=True):
+        empty_dirs = 0
+        for (path, dirnames, filenames) in os.walk(plain_backend.prefix, topdown=False):
             for name in filenames:
                 if not re.search(r'^[^#]+#[0-9]+--?[0-9]+\.tmp$', name):
                     continue
@@ -937,6 +939,15 @@ class Fsck(object):
                 self.found_errors = True
                 self.log_error("removing temporary file %s", name)
                 os.unlink(os.path.join(path, name))
+                
+            if path != plain_backend.prefix:
+                try:
+                    os.rmdir(path)
+                    empty_dirs += 1
+                except OSError:
+                    pass
+                    
+        log.info('Removed %d empty directories', empty_dirs)
 
     def check_objects_id(self):
         """Check objects.id"""
