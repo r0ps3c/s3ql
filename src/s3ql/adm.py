@@ -9,26 +9,22 @@ This work can be distributed under the terms of the GNU GPLv3.
 from .logging import logging, QuietError, setup_logging
 from . import CURRENT_FS_REV, REV_VER_MAP
 from .backends.comprenc import ComprencBackend
-from .backends.common import NoSuchObject
+from .deltadump import INTEGER, BLOB
 from .database import Connection
 from base64 import b64decode
 from .common import (get_seq_no, is_mounted, get_backend, load_params,
                      save_params, handle_on_return, get_backend_factory,
                      AsyncFn)
-from .metadata import dump_and_upload_metadata, download_metadata
+from . import metadata
 from .parse_args import ArgumentParser
 from datetime import datetime as Datetime
 from getpass import getpass
 from queue import Queue, Full as QueueFull
 import os
-import s3ql.backends.common
-import s3ql.backends.s3c
-import hashlib
-import hmac
-import struct
 import re
 import shutil
 import sys
+from unittest import mock
 import textwrap
 import time
 
@@ -147,7 +143,7 @@ def download_metadata_cmd(backend, options):
             raise QuietError('%s already exists, aborting.' % cachepath + i)
 
     param = backend.lookup(name)
-    download_metadata(backend, cachepath + ".db", name)
+    metadata.download_metadata(backend, cachepath + ".db", name)
 
     # Raise sequence number so that fsck.s3ql actually uses the
     # downloaded backup
@@ -306,13 +302,131 @@ def get_old_rev_msg(rev, prog):
         ''' % { 'version': REV_VER_MAP[rev],
                 'prog': prog })
 
+
+def create_old_tables(conn):
+    conn.execute("""
+    CREATE TABLE objects (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        refcount  INT NOT NULL,
+        size      INT NOT NULL
+    )""")
+    conn.execute("""
+    CREATE TABLE blocks (
+        id        INTEGER PRIMARY KEY,
+        hash      BLOB(32) UNIQUE,
+        refcount  INT,
+        size      INT NOT NULL,
+        obj_id    INTEGER NOT NULL REFERENCES objects(id)
+    )""")
+    conn.execute("""
+    CREATE TABLE inodes (
+        -- id has to specified *exactly* as follows to become
+        -- an alias for the rowid.
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        uid       INT NOT NULL,
+        gid       INT NOT NULL,
+        mode      INT NOT NULL,
+        mtime_ns  INT NOT NULL,
+        atime_ns  INT NOT NULL,
+        ctime_ns  INT NOT NULL,
+        refcount  INT NOT NULL,
+        size      INT NOT NULL DEFAULT 0,
+        rdev      INT NOT NULL DEFAULT 0,
+        locked    BOOLEAN NOT NULL DEFAULT 0
+    )""")
+    conn.execute("""
+    CREATE TABLE inode_blocks (
+        inode     INTEGER NOT NULL REFERENCES inodes(id),
+        blockno   INT NOT NULL,
+        block_id    INTEGER NOT NULL REFERENCES blocks(id),
+        PRIMARY KEY (inode, blockno)
+    )""")
+    conn.execute("""
+    CREATE TABLE symlink_targets (
+        inode     INTEGER PRIMARY KEY REFERENCES inodes(id),
+        target    BLOB NOT NULL
+    )""")
+    conn.execute("""
+    CREATE TABLE names (
+        id     INTEGER PRIMARY KEY,
+        name   BLOB NOT NULL,
+        refcount  INT NOT NULL,
+        UNIQUE (name)
+    )""")
+    conn.execute("""
+    CREATE TABLE contents (
+        rowid     INTEGER PRIMARY KEY AUTOINCREMENT,
+        name_id   INT NOT NULL REFERENCES names(id),
+        inode     INT NOT NULL REFERENCES inodes(id),
+        parent_inode INT NOT NULL REFERENCES inodes(id),
+
+        UNIQUE (parent_inode, name_id)
+    )""")
+    conn.execute("""
+    CREATE TABLE ext_attributes (
+        inode     INTEGER NOT NULL REFERENCES inodes(id),
+        name_id   INTEGER NOT NULL REFERENCES names(id),
+        value     BLOB NOT NULL,
+
+        PRIMARY KEY (inode, name_id)
+    )""")
+    conn.execute("""
+    CREATE VIEW contents_v AS
+    SELECT * FROM contents JOIN names ON names.id = name_id
+    """)
+    conn.execute("""
+    CREATE VIEW ext_attributes_v AS
+    SELECT * FROM ext_attributes JOIN names ON names.id = name_id
+    """)
+
+OLD_DUMP_SPEC = [
+             ('objects', 'id', (('id', INTEGER, 1),
+                                ('size', INTEGER),
+                                ('refcount', INTEGER))),
+
+             ('blocks', 'id', (('id', INTEGER, 1),
+                             ('hash', BLOB, 32),
+                             ('size', INTEGER),
+                             ('obj_id', INTEGER, 1),
+                             ('refcount', INTEGER))),
+
+             ('inodes', 'id', (('id', INTEGER, 1),
+                               ('uid', INTEGER),
+                               ('gid', INTEGER),
+                               ('mode', INTEGER),
+                               ('mtime_ns', INTEGER),
+                               ('atime_ns', INTEGER),
+                               ('ctime_ns', INTEGER),
+                               ('size', INTEGER),
+                               ('rdev', INTEGER),
+                               ('locked', INTEGER),
+                               ('refcount', INTEGER))),
+
+             ('inode_blocks', 'inode, blockno',
+              (('inode', INTEGER),
+               ('blockno', INTEGER, 1),
+               ('block_id', INTEGER, 1))),
+
+             ('symlink_targets', 'inode', (('inode', INTEGER, 1),
+                                           ('target', BLOB))),
+
+             ('names', 'id', (('id', INTEGER, 1),
+                              ('name', BLOB),
+                              ('refcount', INTEGER))),
+
+             ('contents', 'parent_inode, name_id',
+              (('name_id', INTEGER, 1),
+               ('inode', INTEGER, 1),
+               ('parent_inode', INTEGER))),
+
+             ('ext_attributes', 'inode', (('inode', INTEGER),
+                                          ('name_id', INTEGER),
+                                          ('value', BLOB))),
+]
+    
 @handle_on_return
 def upgrade(options, on_return):
     '''Upgrade file system to newest revision'''
-
-    s3ql.backends.comprenc.UPGRADE_MODE = checksum_basic_mapping_old
-    s3ql.backends.s3c.UPGRADE_MODE = checksum_basic_mapping_old
-    s3ql.backends.gs.UPGRADE_MODE = checksum_basic_mapping_old
 
     log.info('Getting file system parameters..')
 
@@ -392,156 +506,68 @@ def upgrade(options, on_return):
         raise QuietError()
 
     if not db:
-        db = download_metadata(backend, cachepath + '.db')
+        with mock.patch.object(metadata, 'create_tables', create_old_tables), \
+             mock.patch.object(metadata, 'DUMP_SPEC', OLD_DUMP_SPEC):
+            db = metadata.download_metadata(backend, cachepath + '.db')
 
     log.info('Upgrading from revision %d to %d...', param['revision'], CURRENT_FS_REV)
-
-    update_obj_metadata(backend, backend_factory, db, options)
 
     param['revision'] = CURRENT_FS_REV
     param['last-modified'] = time.time()
     param['seq_no'] += 1
 
-    dump_and_upload_metadata(backend, db, param)
+    # Altering table per https://sqlite.org/lang_altertable.html, section 7
+    # foreign_keys pragma should be off already.
+    db.execute("""
+    CREATE TABLE objects_new (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        hash        BLOB(32) UNIQUE,
+        refcount    INT NOT NULL,
+        phys_size   INT NOT NULL,
+        length      INT NOT NULL
+    )""")
+    db.execute("""
+    CREATE TABLE inode_blocks_new (
+        inode     INTEGER NOT NULL REFERENCES inodes(id),
+        blockno   INT NOT NULL,
+        obj_id    INTEGER NOT NULL REFERENCES objects(id),
+        PRIMARY KEY (inode, blockno)
+    )""")
+                
+    object_refcounts = db.get_val('SELECT COUNT(id) FROM objects WHERE refcount != 1')
+    if object_refcounts:
+        raise RuntimeError(
+            f'`objects` table has refcount != 1 in {object_refcounts} rows!')
+    
+    db.execute('INSERT INTO objects_new (id, hash, refcount, phys_size, length) '
+               'SELECT objects.id, blocks.hash, blocks.refcount, objects.size, blocks.size '
+               'FROM blocks LEFT JOIN objects ON blocks.obj_id = objects.id')
+    
+    db.execute('INSERT INTO inode_blocks_new (inode, blockno, obj_id) '
+               'SELECT inode, blockno, obj_id '
+               'FROM inode_blocks LEFT JOIN blocks ON (block_id = blocks.id)')
+    null_rows = db.get_val('SELECT COUNT(*) FROM inode_blocks_new '
+                           'WHERE obj_id IS NULL')
+    if null_rows:
+        raise RuntimeError(f'`inode_blocks_new` table has {null_rows} NULL values')
+    
+    db.execute('DROP TABLE inode_blocks')
+    db.execute('DROP TABLE blocks')
+    db.execute('DROP TABLE objects')
+    db.execute('ALTER TABLE inode_blocks_new RENAME TO inode_blocks')
+    db.execute('ALTER TABLE objects_new RENAME TO objects')
+
+    log.info('Cleaning up local metadata...')
+    db.execute('ANALYZE')
+    db.execute('VACUUM')
+    
+    metadata.dump_and_upload_metadata(backend, db, param)
+
     backend['s3ql_seq_no_%d' % param['seq_no']] = b'Empty'
 
     print('File system upgrade complete.')
 
 
-def update_obj_metadata(backend, backend_factory, db, options):
-    '''Upgrade metadata of storage objects'''
-
-    # No need to update sequence number, since we are going to
-    # write out a new one after the upgrade.
-    extra_objects = { 's3ql_metadata',
-                      's3ql_passphrase', 's3ql_passphrase_bak1',
-                      's3ql_passphrase_bak2', 's3ql_passphrase_bak3' }
-    extra_objects |= { 's3ql_metadata_bak_%d' % i for i in range(30) }
-
-    def yield_objects():
-        for obj_id in extra_objects:
-            yield obj_id
-        for (id_,) in db.query('SELECT id FROM objects'):
-            yield 's3ql_data_%d' % id_
-    total = db.get_val('SELECT COUNT(id) FROM objects') + len(extra_objects)
-
-    queue = Queue(maxsize=options.threads)
-    threads = []
-    for _ in range(options.threads):
-        t = AsyncFn(upgrade_loop, queue, options, backend_factory)
-        # Don't wait for worker threads, gives deadlock if main thread
-        # terminates with exception
-        t.daemon = True
-        t.start()
-        threads.append(t)
-
-    stamp = time.time()
-    for (i, obj_id) in enumerate(yield_objects()):
-        stamp2 = time.time()
-        if stamp2 - stamp > 1:
-            sys.stdout.write('\r..processed %d/%d objects (%d%%)..'
-                             % (i, total, i/total*100))
-            sys.stdout.flush()
-            stamp = stamp2
-
-            # Terminate early if any thread failed with an exception
-            for t in threads:
-                if not t.is_alive():
-                    t.join_and_raise()
-
-        # Avoid blocking if all threads terminated
-        while True:
-            try:
-                queue.put(obj_id, timeout=1)
-            except QueueFull:
-                pass
-            else:
-                break
-            for t in threads:
-                if not t.is_alive():
-                    t.join_and_raise()
-
-    queue.maxsize += len(threads)
-    for t in threads:
-        queue.put(None)
-
-    for t in threads:
-        t.join_and_raise()
-
-    sys.stdout.write('\n')
-
-def upgrade_loop(queue, options, backend_factory):
-
-    with backend_factory() as backend:
-        while True:
-            key = queue.get()
-            if key is None:
-                break
-
-            # When reading passphrase objects, we have to use the
-            # "outer" password
-            if key.startswith('s3ql_passphrase'):
-                data_pw = backend.passphrase
-                backend.passphrase = options.fs_passphrase
-            try:
-                try:
-                    meta = backend.lookup(key)
-                except NoSuchObject:
-                    continue
-
-                if meta['needs_reupload']:
-                    del meta['needs_reupload']
-                    backend.update_meta(key, meta)
-            finally:
-                if key.startswith('s3ql_passphrase'):
-                    backend.passphrase = data_pw
-
-def checksum_basic_mapping_old(metadata, key=None):
-    '''Compute checksum for mapping of elementary types
-
-    Keys of *d* must be strings. Values of *d* must be of elementary
-    type (i.e., `str`, `bytes`, `int`, `float`, `complex`, `bool` or
-    None). If there is a key named ``signature``, then it is excluded
-    from the checksum computation.
-
-    If *key* is None, compute MD5. Otherwise compute HMAC using *key*.
-    '''
-
-    # In order to compute a safe checksum, we need to convert each object to a
-    # unique representation (i.e, we can't use repr(), as it's output may change
-    # in the future). Furthermore, we have to make sure that the representation
-    # is theoretically reversible, or there is a potential for collision
-    # attacks.
-
-    if key is None:
-        chk = hashlib.md5()
-    else:
-        chk = hmac.new(key, digestmod=hashlib.sha256)
-
-    for mkey in sorted(metadata.keys()):
-        assert isinstance(mkey, str)
-        if mkey == 'signature':
-            continue
-        chk.update(mkey.encode('utf-8'))
-        val = metadata[mkey]
-        if isinstance(val, str):
-            val = b'\0s' + val.encode('utf-8') + b'\0'
-        elif val is None:
-            val = b'\0n'
-        elif isinstance(val, int):
-            val = b'\0i' + ('%d' % val).encode() + b'\0'
-        elif isinstance(val, bool):
-            val = b'\0t' if val else b'\0f'
-        elif isinstance(val, float):
-            val = b'\0d' + struct.pack('<d', val)
-        elif isinstance(val, (bytes, bytearray)):
-            assert len(val).bit_length() <= 32
-            val = b'\0b' + struct.pack('<I', len(val))
-        else:
-            raise ValueError("Don't know how to checksum %s instances" % type(val))
-        chk.update(val)
-
-    return chk.digest()
 
 if __name__ == '__main__':
     main(sys.argv[1:])
