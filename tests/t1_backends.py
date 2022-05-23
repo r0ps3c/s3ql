@@ -35,6 +35,9 @@ import struct
 import tempfile
 import threading
 import time
+import hashlib
+import urllib
+import math
 
 log = logging.getLogger(__name__)
 empty_set = set()
@@ -1292,3 +1295,60 @@ def test_conn_abort(backend, monkeypatch):
 
     enable_temp_fail(backend)
     assert backend[key] == data
+
+@pytest.mark.with_backend('s3c/raw',
+                          require_mock_server=True)
+def test_multipart_chksum(backend, monkeypatch):
+    # Monkeypatch request handler to return multipart md5
+    handler_class = mock_server.S3CRequestHandler
+    parts = 3
+
+    def do_HEAD(self):
+        q = self.parse_url(self.path)
+        (_, _, q.key, query, _) = urllib.parse.urlsplit(q.key)
+        params = urllib.parse.parse_qs(query)
+
+        try:
+            meta = self.server.metadata[q.key]
+            data = self.server.data[q.key]
+        except KeyError:
+            self.send_error(404, code='NoSuchKey', resource=q.key)
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", 'application/octet-stream')
+        self.send_header("Content-Length", str(math.ceil(len(data)/parts)))
+
+        for (name, value) in meta.items():
+            self.send_header(self.hdr_prefix + 'Meta-%s' % name, value)
+        self.end_headers()
+    monkeypatch.setattr(handler_class, 'do_HEAD', do_HEAD)
+
+    # Monkeypatch request handler to produce multi-part etag
+    def send_header(self, keyword ,value, send_header_real=handler_class.send_header):
+        q = self.parse_url(self.path)
+        (_,_,q.key, query,_) = urllib.parse.urlsplit(q.key)
+        params = urllib.parse.parse_qs(query)
+
+        try:
+            data = self.server.data[q.key]
+        except KeyError:
+            self.send_error(404, code='NoSuchKey', resource=q.key)
+            return
+
+        if self.command == 'GET' and keyword == 'ETag':
+            part_md5s=[]
+
+            for part in range(parts):
+                part_md5s.append(hashlib.md5(data[math.ceil(len(data)/parts)*part:math.ceil(len(data)/parts)*(part+1)]).digest())
+
+            send_header_real(self,'ETag', '"%s-%s"' % (hashlib.md5(b''.join(part_md5s)).hexdigest(), parts))
+        else:
+            return send_header_real(self, keyword, value)
+    monkeypatch.setattr(handler_class, 'send_header', send_header)
+
+    key = newname()
+    value = newvalue()
+
+    backend[key] = value
+    assert value == backend.fetch(key)[0]

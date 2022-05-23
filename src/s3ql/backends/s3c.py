@@ -820,7 +820,25 @@ class ObjectR(object):
         # Check MD5 on EOF
         # (size == None implies EOF)
         if (not buf or size is None) and not self.md5_checked:
-            etag = self.resp.headers['ETag'].strip('"')
+            # extract etag and number of parts (if present), so we can handle
+            # multi-part object checksums below
+            etag, _, numparts  = self.resp.headers['ETag'].strip('"').partition("-")
+
+            # handle multi-part objects as per
+            # https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity.html#large-object-checksums,
+            # by calculating md5 of each part and combining to form final checksum
+            if len(numparts):
+                log.debug('%s requires multi-part checksum calculation', self.key)
+                startindex = 0
+                part_md5s=[]
+
+                for partnum in range(int(numparts)):
+                    resp = self.backend._do_request('HEAD', '/%s%s?partNumber=%s' % (self.backend.prefix, self.key, partnum))
+                    part_md5s.append(hashlib.md5(buf[startindex:startindex+int(resp.headers['Content-Length'])]).digest())
+                    startindex += int(resp.headers['Content-Length'])
+
+                self.md5 = hashlib.md5(b''.join(part_md5s))
+
             self.md5_checked = True
             if etag != self.md5.hexdigest():
                 log.warning('MD5 mismatch for %s: %s vs %s',
