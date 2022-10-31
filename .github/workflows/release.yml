@@ -18,7 +18,7 @@ jobs:
     - uses: actions/checkout@v3
     - uses: actions/setup-python@v4
     - run: |
-        sudo apt -y install python3-pip python3-venv libsqlite3-dev pkg-config libfuse3-dev
+        apt -y install python3-pip python3-venv libsqlite3-dev pkg-config libfuse3-dev
         pip3 install build
         python3 -m build
         pip3 install dist/s3ql-4.0.0-cp310-cp310-linux_x86_64.whl
@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
       - run: |
-          sudo apt -y install --no-install-recommends libsqlite3-0 libfuse3-3 python3-pip rsync fuse
+          apt -y install --no-install-recommends libsqlite3-0 libfuse3-3 python3-pip rsync fuse
           pip install --find-links /dist s3ql
           rm -rf src
           pip install pytest_trio
