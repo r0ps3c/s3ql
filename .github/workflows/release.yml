@@ -25,6 +25,7 @@ jobs:
         pip3 install dist/s3ql-4.0.0-cp310-cp310-linux_x86_64.whl
         pip wheel -w dist -r requirements.txt
   test:
+    needs: build
     runs-on: ubuntu-latest
     container:
       image: ubuntu
@@ -41,6 +42,7 @@ jobs:
           pip install pytest_trio
           pytest tests
   release:
+    needs: [build,test]
     runs-on: ubuntu-latest
     permissions:
       contents: write
