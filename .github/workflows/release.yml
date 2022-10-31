@@ -22,9 +22,9 @@ jobs:
         apt -y install python3-pip python3-venv libsqlite3-dev pkg-config libfuse3-dev
         pip3 install build
         python3 -m build
-        cp dist/s3ql-*.tar.gz /dist
-        pip3 install dist/s3ql-4.0.0-cp310-cp310-linux_x86_64.whl
+        pip3 install dist/s3ql-*.whl
         pip wheel -w /dist -r requirements.txt
+        cp dist/s3ql-* /dist
   test:
     needs: build
     runs-on: ubuntu-latest
