@@ -18,6 +18,7 @@ jobs:
     - uses: actions/checkout@v3
     - uses: actions/setup-python@v4
     - run: |
+        apt update
         apt -y install python3-pip python3-venv libsqlite3-dev pkg-config libfuse3-dev
         pip3 install build
         python3 -m build
@@ -33,6 +34,7 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
       - run: |
+          apt update
           apt -y install --no-install-recommends libsqlite3-0 libfuse3-3 python3-pip rsync fuse
           pip install --find-links /dist s3ql
           rm -rf src
