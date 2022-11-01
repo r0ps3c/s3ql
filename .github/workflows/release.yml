@@ -27,6 +27,11 @@ jobs:
         cp dist/s3ql-* /dist
         ls -l /dist
         df /dist
+    container:
+      image: ubuntu
+      volumes:
+        - /dist:/dist
+    steps:
     - uses: actions/setup-python@v4
     - run: |
         df /dist
