@@ -40,7 +40,7 @@ jobs:
         pip install pytest_trio
         pytest tests
   release:
-    needs: [build,test]
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
