@@ -6,7 +6,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      sdistname: ${{ steps.upload.outputs.sdistname }}
+      sdistname: ${{ steps.outputfile.outputs.sdistname }}
     steps:
     - uses: actions/checkout@v3
     - name: build
