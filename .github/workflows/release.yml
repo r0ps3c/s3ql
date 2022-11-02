@@ -8,40 +8,38 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  buildntest:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
-    - uses: actions/setup-python@v4
-    - run: |
-        apt update
-        apt -y install python3-pip python3-venv libsqlite3-dev pkg-config libfuse3-dev
-        pip3 install build
-        python3 -m build
-        pip3 install dist/s3ql-*.whl
-        pip wheel -w /dist -r requirements.txt
-        cp dist/s3ql-* /dist
-    container:
-      image: ubuntu
-      volumes:
-        - /dist:/dist
-    steps:
-    - uses: actions/setup-python@v4
-    - run: |
-        apt update
-        apt -y install --no-install-recommends libsqlite3-0 libfuse3-3 python3-pip rsync fuse
-        pip install --find-links /dist s3ql
-        tar zxf /dist/s3ql-*.tar.gz
-        cd s3ql-*
-        rm -rf src
-        pip install pytest_trio
-        pytest tests
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-    - uses: ncipollo/release-action@v1
+    - name: build
+      uses: addnab/docker-run-action@v3
+      with:
+        image: ubuntu
+        options: -v ${{ github.workspace }}:/work
+        run: |
+          apt update
+          apt -y install python3-pip python3-venv libsqlite3-dev pkg-config libfuse3-dev
+          pip3 install build
+          python3 -m build
+          pip3 install dist/s3ql-*.whl
+          pip wheel -w /dist -r requirements.txt
+          cp dist/s3ql-* /dist
+    - name: test
+      uses: addnab/docker-run-action@v3
+      with:
+        image: ubuntu
+        options: -v ${{ github.workspace }}:/work
+        run: |
+          apt update
+          apt -y install --no-install-recommends libsqlite3-0 libfuse3-3 python3-pip rsync fuse
+          pip install --find-links /dist s3ql
+          tar zxf /dist/s3ql-*.tar.gz
+          cd s3ql-*
+          rm -rf src
+          pip install pytest_trio
+          pytest tests
+    - name: release
+      uses: ncipollo/release-action@v1
       with:
         artifacts: "dist/s3ql-*.tar.gz"
