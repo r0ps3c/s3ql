@@ -27,7 +27,7 @@ jobs:
         options: -v ${{ github.workspace }}:/work --device=/dev/fuse --cap-add=SYS_ADMIN --security-opt apparmor:unconfined
         run: |
           apt update
-          apt -y install --no-install-recommends libsqlite3-0 libfuse3-3 python3-pip rsync fuse
+          apt -y install --no-install-recommends libsqlite3-0 libfuse3-3 python3-pip rsync fuse psmisc
           pip install --find-links /work/dist s3ql
           tar zxf /work/dist/s3ql-*.tar.gz
           cd s3ql-*
