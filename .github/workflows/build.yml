@@ -1,12 +1,6 @@
 name: "build"
 
-on: 
-  push:
-    branches: [$default-branch]
-  pull_request:
-    branches: [$default-branch]
-  workflow_dispatch:
-  workflow_call:
+on: [push, pull_request_review, workflow_dispatch, workflow_call]
 
 jobs:
   build:
