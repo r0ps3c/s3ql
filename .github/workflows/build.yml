@@ -40,6 +40,6 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: s3ql-${{github.sha}}.tar.gz
-        path: /work/s3ql-*.tar.gz
+        path: /work/dist/s3ql-*.tar.gz
     - name: savefile
       run: echo "sdistname=s3ql-${{github.sha}}.tar.gz" >> ${GITHUB_OUTPUT}
