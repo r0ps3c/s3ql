@@ -5,6 +5,8 @@ on: [push, pull_request_review, workflow_dispatch, workflow_call]
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      sdistname: ${{ steps.upload.outputs.sdistname }}
     steps:
     - uses: actions/checkout@v3
     - name: build
@@ -34,3 +36,10 @@ jobs:
           rm -rf src
           pip install pytest_trio
           pytest tests
+    - name: upload
+      uses: actions/upload-artifact@v3
+      with:
+        name: s3ql-${{github.sha}}.tar.gz
+        path: /work/s3ql-*.tar.gz
+    - name: savefile
+      run: echo "sdistname=s3ql-${{github.sha}}.tar.gz" >> ${GITHUB_OUTPUT}
