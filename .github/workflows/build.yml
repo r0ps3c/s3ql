@@ -24,7 +24,7 @@ jobs:
       uses: addnab/docker-run-action@v3
       with:
         image: ubuntu
-        options: -v ${{ github.workspace }}:/work
+        options: -v ${{ github.workspace }}:/work --device=/dev/fuse --cap-add=SYS_ADMIN --security-opt apparmor:unconfined
         run: |
           apt update
           apt -y install --no-install-recommends libsqlite3-0 libfuse3-3 python3-pip rsync fuse
