@@ -12,5 +12,5 @@ jobs:
     uses: ./.github/workflows/build.yml
   release:
     uses: ncipollo/release-action@v1
-      with:
-        artifacts: "dist/s3ql-*.tar.gz"
+    with:
+      artifacts: "dist/s3ql-*.tar.gz"
