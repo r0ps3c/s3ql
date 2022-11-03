@@ -16,7 +16,7 @@ jobs:
       sdistname: ${{ steps.outputfile.outputs.sdistname }}
     steps:
     - uses: actions/checkout@v3
-    - name: build
+    - id: build
       uses: addnab/docker-run-action@v3
       with:
         image: ubuntu
@@ -29,7 +29,7 @@ jobs:
           python3 -m build
           pip3 install dist/s3ql-*.whl
           pip wheel -w ./dist -r requirements.txt
-    - name: test
+    - id: test
       uses: addnab/docker-run-action@v3
       with:
         image: ubuntu
@@ -43,10 +43,10 @@ jobs:
           rm -rf src
           pip install pytest_trio
           pytest tests
-    - name: upload
+    - id: upload
       uses: actions/upload-artifact@v3
       with:
         name: s3ql-${{github.sha}}.tar.gz
         path: ${{github.workspace}}/dist/s3ql-*.tar.gz
-    - name: outputfile
+    - id: outputfile
       run: echo "sdistname=s3ql-${{github.sha}}.tar.gz" >> ${GITHUB_OUTPUT}
