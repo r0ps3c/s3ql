@@ -2,6 +2,8 @@ name: "build"
 
 on: 
   push:
+    tags-ignore:
+      - "release-*"
   pull_request_review:
   workflow_dispatch:
   workflow_call:
