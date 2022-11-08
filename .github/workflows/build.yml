@@ -50,5 +50,6 @@ jobs:
       with:
         name: s3ql-${{github.sha}}.tar.gz
         path: ${{github.workspace}}/dist/s3ql-*.tar.gz
+        if-no-files-found: error
     - id: outputfile
       run: echo "sdistname=s3ql-${{github.sha}}.tar.gz" >> ${GITHUB_OUTPUT}
