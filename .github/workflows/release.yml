@@ -16,6 +16,9 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           name: ${{ needs.build.outputs.sdistname }}
+      - run: |
+          pwd
+          ls -l
       - uses: ncipollo/release-action@v1
         with:
           artifacts: ${{ needs.build.outputs.sdistname }}
