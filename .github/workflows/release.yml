@@ -3,19 +3,19 @@ name: "tagged-release"
 on: 
   push:
     tags:
-    - "v*"
+    - "release-*"
   workflow_dispatch:
 
 jobs:
   build:
+    uses: ./.github/workflows/build.yml
+  release:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    needs: build
     steps:
-    - uses: actions/checkout@v3
-    - uses: actions/setup-python@v4
-    - run: ./make_release.sh
-    - uses: ncipollo/release-action@v1
-      with:
-        artifacts: "dist/s3ql-*.tar.gz"
-        token: ${{ secrets.YOUR_GITHUB_TOKEN }}
+      - uses: actions/download-artifact@v3
+        with:
+          name: ${{ needs.build.outputs.sdistname }}
+      - uses: ncipollo/release-action@v1
+        with:
+          artifacts: ${{ needs.build.outputs.sdistname }}

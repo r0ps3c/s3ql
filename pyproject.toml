@@ -1,0 +1,72 @@
+[build-system]
+requires = ["setuptools>=45","wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name="s3ql"
+description="a full-featured file system for online data storage"
+#readme = "README.rst"
+license = {file="LICENSE"}
+authors = [
+	{ name="Nikolaus Rath", email="Nikolaus@rath.org" },
+]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Environment :: No Input/Output (Daemon)",
+  "Environment :: Console",
+  "License :: OSI Approved :: GNU Library or Lesser General Public License (GPLv3)",
+  "Topic :: Internet",
+  "Operating System :: POSIX",
+  "Topic :: System :: Archiving",
+]
+keywords=["FUSE", "backup", "archival", "compression", "encryption", "deduplication", "aws", "s3" ]
+dynamic = ["version", "dependencies"]
+
+[project.scripts]
+"mkfs.s3ql" = "s3ql.mkfs:main"
+"fsck.s3ql" = "s3ql.fsck:main"
+"mount.s3ql" = "s3ql.mount:main"
+"umount.s3ql" = "s3ql.umount:main"
+"s3qlcp" = "s3ql.cp:main"
+"s3qlstat" = "s3ql.statfs:main"
+"s3qladm" = "s3ql.adm:main"
+"s3qlctrl" = "s3ql.ctrl:main"
+"s3qllock" = "s3ql.lock:main"
+"s3qlrm" = "s3ql.remove:main"
+"s3ql_oauth_client" = "s3ql.oauth_client:main"
+"s3ql_verify" = "s3ql.verify:main"
+
+[project.urls]
+homepage = "https://github.com/s3ql/s3ql"
+releases = "https://github.com/s3ql/s3ql/releases"
+
+[tool.setuptools.exclude-package-data]
+s3ql = ["deltadump.c"]
+
+[tool.setuptools.package-data]
+s3ql = ["endian_indep.h"]
+
+[tool.tox]
+legacy_tox_ini = """
+[tox]
+envlist = py3
+isolated_build = True
+skipsdist = True
+
+[testenv]
+deps = 
+  pytest
+  pytest_trio
+  -rrequirements.txt
+
+changedir = tests
+commands = pytest -vvv --basetemp="{envtmpdir}" {posargs}
+platform = linux|darwin
+"""
+
+[tool.setuptools.dynamic]
+version = {attr = "s3ql.VERSION"}
+dependencies = {file = ["requirements.txt"]}
+
+#[options.extras_require]
+#test = ["pytest"]

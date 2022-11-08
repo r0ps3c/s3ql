@@ -1,0 +1,54 @@
+name: "build"
+
+on: 
+  push:
+    tags-ignore:
+      - "release-*"
+  pull_request_review:
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      sdistname:
+        value: ${{jobs.build.outputs.sdistname}}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      sdistname: ${{ steps.outputfile.outputs.sdistname }}
+    steps:
+    - uses: actions/checkout@v3
+    - id: build
+      uses: addnab/docker-run-action@v3
+      with:
+        image: ubuntu
+        options: -v ${{ github.workspace }}:/work
+        run: |
+          apt update
+          apt -y install python3-pip python3-venv libsqlite3-dev pkg-config libfuse3-dev
+          pip3 install build
+          cd /work
+          python3 -m build
+          pip3 install dist/s3ql-*.whl
+          pip wheel -w ./dist -r requirements.txt
+    - id: test
+      uses: addnab/docker-run-action@v3
+      with:
+        image: ubuntu
+        options: -v ${{ github.workspace }}:/work --device=/dev/fuse --cap-add=SYS_ADMIN --security-opt apparmor:unconfined
+        run: |
+          apt update
+          apt -y install --no-install-recommends libsqlite3-0 libfuse3-3 python3-pip rsync fuse psmisc
+          pip install --find-links /work/dist s3ql
+          tar zxf /work/dist/s3ql-*.tar.gz
+          cd s3ql-*
+          rm -rf src
+          pip install pytest_trio
+          pytest tests
+    - id: upload
+      uses: actions/upload-artifact@v3
+      with:
+        name: s3ql-${{github.sha}}.tar.gz
+        path: ${{github.workspace}}/dist/s3ql-*.tar.gz
+    - id: outputfile
+      run: echo "sdistname=s3ql-${{github.sha}}.tar.gz" >> ${GITHUB_OUTPUT}

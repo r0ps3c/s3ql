@@ -279,14 +279,15 @@ class BlockCache(object):
             t.join()
 
         assert len(self.in_transit) == 0
-        try:
-            while self.to_remove.get_nowait() is QuitSentinel:
+        if self.to_remove:
+            try:
+                while self.to_remove.get_nowait() is QuitSentinel:
+                    pass
+            except QueueEmpty:
                 pass
-        except QueueEmpty:
-            pass
-        else:
-            log.error('Could not complete object removals, '
-                      'no removal threads left alive')
+            else:
+                log.error('Could not complete object removals, '
+                        'no removal threads left alive')
 
         self.to_upload = None
         self.to_remove = None
