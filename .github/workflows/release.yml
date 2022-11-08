@@ -17,7 +17,7 @@ jobs:
         with:
           name: ${{ needs.build.outputs.sdistname }}
       - run: |
-          mv s3ql-${{ needs.build.outputs.sdistname }}.tar.gz s3ql-${{github.ref}}.tar.gz
+          mv ${{ needs.build.outputs.sdistname }} s3ql-${{github.ref}}.tar.gz
       - uses: ncipollo/release-action@v1
         with:
           artifacts: s3ql-${{github.ref}}.tar.gz
