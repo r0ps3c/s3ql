@@ -15,7 +15,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      sdistname: ${{ steps.outputfile.outputs.sdistname }}
+      sdistname: ${{ steps.aname.outputs.artifactname }}
+      version: ${{ steps.build.outputs.version }}
     steps:
     - uses: actions/checkout@v3
     - id: build
@@ -31,6 +32,7 @@ jobs:
           python3 -m build
           pip3 install dist/s3ql-*.whl
           pip wheel -w ./dist -r requirements.txt
+          python3 -c 'import build.util;print("{}={}".format("version",build.util.project_wheel_metadata(srcdir=".")["Version"]))' >> ${GITHUB_OUTPUT}
     - id: test
       uses: addnab/docker-run-action@v3
       with:
@@ -48,8 +50,8 @@ jobs:
     - id: upload
       uses: actions/upload-artifact@v3
       with:
-        name: s3ql-${{github.sha}}.tar.gz
+        name: ${{github.sha}}
         path: ${{github.workspace}}/dist/s3ql-*.tar.gz
         if-no-files-found: error
-    - id: outputfile
-      run: echo "sdistname=s3ql-${{github.sha}}.tar.gz" >> ${GITHUB_OUTPUT}
+    - id: aname
+      run: echo "artifactname=${{github.sha}}" >> ${GITHUB_OUTPUT}

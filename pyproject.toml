@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name="s3ql"
 description="a full-featured file system for online data storage"
 #readme = "README.rst"
-license = {file="LICENSE"}
+#license = {file="LICENSE"}
 authors = [
 	{ name="Nikolaus Rath", email="Nikolaus@rath.org" },
 ]
@@ -46,27 +46,6 @@ s3ql = ["deltadump.c"]
 [tool.setuptools.package-data]
 s3ql = ["endian_indep.h"]
 
-[tool.tox]
-legacy_tox_ini = """
-[tox]
-envlist = py3
-isolated_build = True
-skipsdist = True
-
-[testenv]
-deps = 
-  pytest
-  pytest_trio
-  -rrequirements.txt
-
-changedir = tests
-commands = pytest -vvv --basetemp="{envtmpdir}" {posargs}
-platform = linux|darwin
-"""
-
 [tool.setuptools.dynamic]
 version = {attr = "s3ql.VERSION"}
 dependencies = {file = ["requirements.txt"]}
-
-#[options.extras_require]
-#test = ["pytest"]
