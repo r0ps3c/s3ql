@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       sdistname: ${{ steps.aname.outputs.artifactname }}
-      version: ${{ steps.build.outputs.version }}
+      version: ${{ steps.getversion.outputs.version }}
     steps:
     - uses: actions/checkout@v3
     - id: build
@@ -32,7 +32,13 @@ jobs:
           python3 -m build
           pip3 install dist/s3ql-*.whl
           pip wheel -w ./dist -r requirements.txt
-          python3 -c 'import build.util;print("{}={}".format("version",build.util.project_wheel_metadata(srcdir=".")["Version"]))' >> ${GITHUB_OUTPUT}
+    - id: getversion
+      shell: python
+      run: |
+        import os,build.util
+
+        with open(os.environ["GITHUB_OUTPUT"], "a+") as fout:
+          fout.write("{}={}".format("version",build.util.project_wheel_metadata(srcdir=".")["Version"]))
     - id: test
       uses: addnab/docker-run-action@v3
       with:

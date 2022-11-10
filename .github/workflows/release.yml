@@ -18,4 +18,4 @@ jobs:
           name: ${{ needs.build.outputs.artifactname }}
       - uses: ncipollo/release-action@v1
         with:
-          artifacts: s3ql-${{needs.build.outputs.version}}.tar.gz
+          artifacts: s3ql-${{needs.getversion.outputs.version}}.tar.gz
