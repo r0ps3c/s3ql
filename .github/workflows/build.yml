@@ -22,7 +22,7 @@ jobs:
     - id: build
       uses: addnab/docker-run-action@v3
       with:
-        image: ubuntu-22.04
+        image: ubuntu:latest
         options: -v ${{ github.workspace }}:/work
         run: |
           apt update
@@ -47,7 +47,7 @@ jobs:
     - id: test
       uses: addnab/docker-run-action@v3
       with:
-        image: ubuntu-22.04
+        image: ubuntu:latest
         options: -v ${{ github.workspace }}:/work --device=/dev/fuse --cap-add=SYS_ADMIN --security-opt apparmor:unconfined
         run: |
           apt update
