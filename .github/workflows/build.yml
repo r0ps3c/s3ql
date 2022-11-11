@@ -15,7 +15,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      sdistname: ${{ steps.aname.outputs.artifactname }}
+      aname: ${{ steps.aname.outputs.artifactname }}
       version: ${{ steps.getversion.outputs.version }}
     steps:
     - uses: actions/checkout@v3
