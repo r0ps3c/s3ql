@@ -35,7 +35,7 @@ jobs:
     - id: getversion
       shell: python
       run: |
-        import os,sys,subprocess
+        import os,sys,subprocess,site
 
         if not subprocess.call([sys.executable, '-m', 'pip', 'install','build']):
           sys.path.append(site.USER_SITE)
