@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v3
         with:
-          name: ${{ needs.build.outputs.sdistname }}
+          name: ${{ needs.build.outputs.aname }}
       - uses: ncipollo/release-action@v1
         with:
-          artifacts: ${{ needs.build.outputs.sdistname }}
+          artifacts: s3ql-${{needs.build.outputs.version}}.tar.gz

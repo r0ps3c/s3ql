@@ -8,16 +8,33 @@ on:
   workflow_dispatch:
   workflow_call:
     outputs:
-      sdistname:
-        value: ${{jobs.build.outputs.sdistname}}
+      aname:
+        value: ${{jobs.build.outputs.aname}}
+      version:
+        value: ${{jobs.build.outputs.version}}
 
 jobs:
   build:
     runs-on: ubuntu-latest
     outputs:
-      sdistname: ${{ steps.outputfile.outputs.sdistname }}
+      aname: ${{ steps.aname.outputs.artifactname }}
+      version: ${{ steps.getversion.outputs.version }}
     steps:
     - uses: actions/checkout@v3
+    - id: getversion
+      shell: python
+      run: |
+        import os,sys,subprocess,site
+
+        if not subprocess.call([sys.executable, '-m', 'pip', 'install','build']):
+          sys.path.append(site.USER_SITE)
+          
+          import build.util
+          
+          with open(os.environ["GITHUB_OUTPUT"], "a+") as fout:
+            fout.write("{}={}".format("version",build.util.project_wheel_metadata(srcdir=".")["Version"]))
+        else:
+          sys.exit(1)
     - id: build
       uses: addnab/docker-run-action@v3
       with:
@@ -29,7 +46,7 @@ jobs:
           pip3 install build
           cd /work
           python3 -m build
-          pip3 install dist/s3ql-*.whl
+          pip3 install dist/s3ql-${{ steps.getversion.outputs.version }}.whl
           pip wheel -w ./dist -r requirements.txt
     - id: test
       uses: addnab/docker-run-action@v3
@@ -40,15 +57,16 @@ jobs:
           apt update
           apt -y install --no-install-recommends libsqlite3-0 libfuse3-3 python3-pip rsync fuse psmisc
           pip install --find-links /work/dist s3ql
-          tar zxf /work/dist/s3ql-*.tar.gz
-          cd s3ql-*
+          tar zxf /work/dist/s3ql-${{ steps.getversion.outputs.version }}.tar.gz
+          cd s3ql-${{ steps.getversion.outputs.version }}
           rm -rf src
           pip install pytest_trio
           pytest tests
     - id: upload
       uses: actions/upload-artifact@v3
       with:
-        name: s3ql-${{github.sha}}.tar.gz
-        path: ${{github.workspace}}/dist/s3ql-*.tar.gz
-    - id: outputfile
-      run: echo "sdistname=s3ql-${{github.sha}}.tar.gz" >> ${GITHUB_OUTPUT}
+        name: ${{github.sha}}
+        path: ${{github.workspace}}/dist/s3ql-${{ steps.getversion.outputs.version }}.tar.gz
+        if-no-files-found: error
+    - id: aname
+      run: echo "artifactname=${{github.sha}}" >> ${GITHUB_OUTPUT}
