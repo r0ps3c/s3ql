@@ -16,7 +16,7 @@ from s3ql.backends import local
 from s3ql import ROOT_INODE
 from s3ql.mkfs import init_tables
 from s3ql.metadata import create_tables
-from s3ql.database import Connection, NoSuchRowError
+from s3ql.database import Connection, NoSuchRowError, u2s_ns
 from s3ql.fsck import Fsck
 from s3ql.common import time_ns
 from argparse import Namespace
@@ -74,7 +74,7 @@ class fsck_tests(unittest.TestCase):
                               "VALUES (?,?,?,?,?,?,?,?)",
                               (stat.S_IFREG | stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
                                | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH,
-                               os.getuid(), os.getgid(), time_ns(), time_ns(), time_ns(),
+                               os.getuid(), os.getgid(), u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()),
                                1, 8))
         self._link(b'test-entry', inode)
 
@@ -144,7 +144,7 @@ class fsck_tests(unittest.TestCase):
         inode = self.db.rowid("INSERT INTO inodes (mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount,size) "
                               "VALUES (?,?,?,?,?,?,?,?)",
                               (stat.S_IFREG | stat.S_IRUSR | stat.S_IWUSR,
-                               0, 0, time_ns(), time_ns(), time_ns(), 1, 0))
+                               0, 0, u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1, 0))
         self._link(b'name1', inode)
         self._link(b'name2', inode)
         self.assert_fsck(self.fsck.check_inodes_refcount)
@@ -154,7 +154,7 @@ class fsck_tests(unittest.TestCase):
         self.db.rowid("INSERT INTO inodes (mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount,size) "
                       "VALUES (?,?,?,?,?,?,?,?)",
                       (stat.S_IFREG | stat.S_IRUSR | stat.S_IWUSR,
-                       0, 0, time_ns(), time_ns(), time_ns(), 1, 0))
+                       0, 0, u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1, 0))
         self.assert_fsck(self.fsck.check_inodes_refcount)
 
     def test_name_refcount(self):
@@ -162,7 +162,7 @@ class fsck_tests(unittest.TestCase):
         inode = self.db.rowid("INSERT INTO inodes (mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount,size) "
                               "VALUES (?,?,?,?,?,?,?,?)",
                               (stat.S_IFREG | stat.S_IRUSR | stat.S_IWUSR,
-                               0, 0, time_ns(), time_ns(), time_ns(), 2, 0))
+                               0, 0, u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 2, 0))
         self._link(b'name1', inode)
         self._link(b'name2', inode)
 
@@ -187,7 +187,7 @@ class fsck_tests(unittest.TestCase):
         inode = self.db.rowid("INSERT INTO inodes (mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount,size) "
                               "VALUES (?,?,?,?,?,?,?,?)",
                               (stat.S_IFDIR | stat.S_IRUSR | stat.S_IWUSR,
-                               0, 0, time_ns(), time_ns(), time_ns(), 1, 0))
+                               0, 0, u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1, 0))
         self.db.execute('INSERT INTO contents (name_id, inode, parent_inode) VALUES(?,?,?)',
                         (self._add_name(b'foobar'), inode, 123))
 
@@ -198,7 +198,7 @@ class fsck_tests(unittest.TestCase):
         inode = self.db.rowid("INSERT INTO inodes (mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount,size) "
                               "VALUES (?,?,?,?,?,?,?,?)",
                               (stat.S_IFDIR | stat.S_IRUSR | stat.S_IWUSR,
-                               0, 0, time_ns(), time_ns(), time_ns(), 1, 0))
+                               0, 0, u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1, 0))
         self.db.execute('INSERT INTO contents (name_id, inode, parent_inode) VALUES(?,?,?)',
                         (42, inode, ROOT_INODE))
 
@@ -230,7 +230,7 @@ class fsck_tests(unittest.TestCase):
         id_ = self.db.rowid("INSERT INTO inodes (mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount,size) "
                             "VALUES (?,?,?,?,?,?,?,?)",
                             (stat.S_IFREG | stat.S_IRUSR | stat.S_IWUSR,
-                             0, 0, time_ns(), time_ns(), time_ns(), 1, 128))
+                             0, 0, u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1, 128))
         self._link(b'test-entry', id_)
 
         block_size = self.max_obj_size // 3
@@ -298,7 +298,7 @@ class fsck_tests(unittest.TestCase):
         id_ = self.db.rowid("INSERT INTO inodes (mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount,size) "
                             "VALUES (?,?,?,?,?,?,?,?)",
                             (stat.S_IFREG | stat.S_IRUSR | stat.S_IWUSR,
-                             0, 0, time_ns(), time_ns(), time_ns(), 1, 8))
+                             0, 0, u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1, 8))
         self._link(b'test-entry', id_)
 
         # Assume that due to a crash we did not write the hash for the block
@@ -329,7 +329,7 @@ class fsck_tests(unittest.TestCase):
         id_ = self.db.rowid("INSERT INTO inodes (mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount,size) "
                             "VALUES (?,?,?,?,?,?,?,?)",
                             (stat.S_IFREG | stat.S_IRUSR | stat.S_IWUSR,
-                             0, 0, time_ns(), time_ns(), time_ns(), 1, 128))
+                             0, 0, u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1, 128))
         self.db.execute('INSERT INTO inode_blocks (inode, blockno, obj_id) VALUES(?,?,?)',
                         (id_, 0, obj_id))
 
@@ -354,7 +354,7 @@ class fsck_tests(unittest.TestCase):
         id_ = self.db.rowid("INSERT INTO inodes (mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount,size) "
                             "VALUES (?,?,?,?,?,?,?,?)",
                             (stat.S_IFREG | stat.S_IRUSR | stat.S_IWUSR,
-                             0, 0, time_ns(), time_ns(), time_ns(), 1, 128))
+                             0, 0, u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1, 128))
         self.db.execute('INSERT INTO inode_blocks (inode, blockno, obj_id) VALUES(?,?,?)',
                         (id_, 0, 35))
 
@@ -380,7 +380,7 @@ class fsck_tests(unittest.TestCase):
         id_ = self.db.rowid("INSERT INTO inodes (mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount,size) "
                             "VALUES (?,?,?,?,?,?,?,?)",
                             (stat.S_IFREG | stat.S_IRUSR | stat.S_IWUSR,
-                             0, 0, time_ns(), time_ns(), time_ns(), 1, 128))
+                             0, 0, u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1, 128))
         self._link(b'test-entry', id_)
 
         self.db.execute('INSERT INTO ext_attributes (name_id, inode, value) VALUES(?,?,?)',
@@ -399,7 +399,7 @@ class fsck_tests(unittest.TestCase):
         inodes = [ self.db.rowid("INSERT INTO inodes (mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount) "
                                  "VALUES (?,?,?,?,?,?,?)",
                                  (stat.S_IFDIR | stat.S_IRUSR | stat.S_IWUSR,
-                                  0, 0, time_ns(), time_ns(), time_ns(), 1))
+                                  0, 0, u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1))
                    for dummy in range(3) ]
 
         inodes.append(inodes[0])
@@ -432,7 +432,7 @@ class fsck_tests(unittest.TestCase):
         inode = self.db.rowid("INSERT INTO inodes (mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount,size) "
                               "VALUES (?,?,?,?,?,?,?,?)",
                               (stat.S_IFREG | stat.S_IRUSR | stat.S_IWUSR,
-                               os.getuid(), os.getgid(), time_ns(), time_ns(), time_ns(),
+                               os.getuid(), os.getgid(), u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()),
                                1, 2048))
         self._link(b'test-entry', inode)
         self.db.execute('INSERT INTO inode_blocks (inode, blockno, obj_id) VALUES(?,?,?)',
@@ -456,7 +456,7 @@ class fsck_tests(unittest.TestCase):
         self.db.execute("INSERT INTO inodes (id, mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount,size) "
                         "VALUES (?,?,?,?,?,?,?,?,?)",
                         (inode, stat.S_IFIFO | stat.S_IRUSR | stat.S_IWUSR,
-                         os.getuid(), os.getgid(), time_ns(), time_ns(), time_ns(), 1, 0))
+                         os.getuid(), os.getgid(), u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1, 0))
         self._link(b'test-entry', inode)
         self.db.execute('UPDATE inodes SET size = 1 WHERE id=?', (inode,))
         self.assert_fsck(self.fsck.check_unix, can_fix=False)
@@ -469,7 +469,7 @@ class fsck_tests(unittest.TestCase):
         self.db.execute("INSERT INTO inodes (id, mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount,size) "
                         "VALUES (?,?,?,?,?,?,?,?,?)",
                         (inode, stat.S_IFLNK | stat.S_IRUSR | stat.S_IWUSR,
-                         os.getuid(), os.getgid(), time_ns(), time_ns(), time_ns(), 1,
+                         os.getuid(), os.getgid(), u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1,
                          len(target)))
         self.db.execute('INSERT INTO symlink_targets (inode, target) VALUES(?,?)', (inode, target))
         self._link(b'test-entry', inode)
@@ -482,7 +482,7 @@ class fsck_tests(unittest.TestCase):
         self.db.execute("INSERT INTO inodes (id, mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount) "
                      "VALUES (?,?,?,?,?,?,?,?)",
                      (inode, stat.S_IFCHR | stat.S_IRUSR | stat.S_IWUSR,
-                      os.getuid(), os.getgid(), time_ns(), time_ns(), time_ns(), 1))
+                      os.getuid(), os.getgid(), u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1))
         self._link(b'test-entry', inode)
         self.db.execute('INSERT INTO symlink_targets (inode, target) VALUES(?,?)', (inode, 'foo'))
         self.assert_fsck(self.fsck.check_unix, can_fix=False)
@@ -529,7 +529,7 @@ class fsck_tests(unittest.TestCase):
         inode = self.db.rowid("INSERT INTO inodes (mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount) "
                               "VALUES (?,?,?,?,?,?,?)",
                               (stat.S_IFLNK | stat.S_IRUSR | stat.S_IWUSR,
-                               os.getuid(), os.getgid(), time_ns(), time_ns(), time_ns(), 1))
+                               os.getuid(), os.getgid(), u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1))
         self._link(b'test-entry', inode)
         self.assert_fsck(self.fsck.check_unix, can_fix=False)
 
@@ -539,7 +539,7 @@ class fsck_tests(unittest.TestCase):
         self.db.execute("INSERT INTO inodes (id, mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount) "
                      "VALUES (?,?,?,?,?,?,?,?)",
                      (inode, stat.S_IFIFO | stat.S_IRUSR | stat.S_IWUSR,
-                      os.getuid(), os.getgid(), time_ns(), time_ns(), time_ns(), 1))
+                      os.getuid(), os.getgid(), u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1))
         self._link(b'test-entry', inode)
         self.db.execute('UPDATE inodes SET rdev=? WHERE id=?', (42, inode))
         self.assert_fsck(self.fsck.check_unix, can_fix=False)
@@ -549,7 +549,7 @@ class fsck_tests(unittest.TestCase):
         inode = self.db.rowid("INSERT INTO inodes (mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount) "
                    "VALUES (?,?,?,?,?,?,?)",
                    (stat.S_IFREG | stat.S_IRUSR | stat.S_IWUSR,
-                    os.getuid(), os.getgid(), time_ns(), time_ns(), time_ns(), 1))
+                    os.getuid(), os.getgid(), u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1))
         self._link(b'test-entry', inode)
         self.db.execute('INSERT INTO contents (name_id, inode, parent_inode) VALUES(?,?,?)',
                         (self._add_name(b'foo'), ROOT_INODE, inode))
@@ -561,7 +561,7 @@ class fsck_tests(unittest.TestCase):
         inode = self.db.rowid("INSERT INTO inodes (mode,uid,gid,mtime_ns,atime_ns,ctime_ns,refcount) "
                               "VALUES (?,?,?,?,?,?,?)",
                               (stat.S_IFSOCK | stat.S_IRUSR | stat.S_IWUSR,
-                               os.getuid(), os.getgid(), time_ns(), time_ns(), time_ns(), 1))
+                               os.getuid(), os.getgid(), u2s_ns(time_ns()), u2s_ns(time_ns()), u2s_ns(time_ns()), 1))
         self._link(b'test-entry', inode)
         obj_id = self.db.rowid('INSERT INTO objects (refcount, phys_size, length) '
                                'VALUES(1, 32, 0)')

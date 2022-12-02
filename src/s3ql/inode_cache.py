@@ -7,7 +7,7 @@ This work can be distributed under the terms of the GNU GPLv3.
 '''
 
 from .logging import logging # Ensure use of custom logger class
-from .database import NoSuchRowError
+from .database import NoSuchRowError, s2u_ns, u2s_ns
 import pyfuse3
 import sys
 
@@ -181,7 +181,10 @@ class InodeCache(object):
         inode = _Inode(self.generation)
 
         for (i, id_) in enumerate(ATTRIBUTES):
-            setattr(inode, id_, attrs[i])
+            if id_ in ('atime_ns','ctime_ns','mtime_ns'):
+                setattr(inode, id_, s2u_ns(attrs[i]))
+            else:
+                setattr(inode, id_, attrs[i])
 
         inode.dirty = False
 
@@ -189,7 +192,7 @@ class InodeCache(object):
 
     def create_inode(self, **kw):
 
-        bindings = tuple(kw[x] for x in ATTRIBUTES if x in kw)
+        bindings = tuple(kw[x] if x not in ('atime_ns','ctime_ns','mtime_ns') else u2s_ns(kw[x]) for x in ATTRIBUTES if x in kw)
         columns = ', '.join(x for x in ATTRIBUTES if x in kw)
         values = ', '.join('?' * len(kw))
 
@@ -204,7 +207,7 @@ class InodeCache(object):
         inode.dirty = False
 
         self.db.execute("UPDATE inodes SET %s WHERE id=?" % UPDATE_STR,
-                        [ getattr(inode, x) for x in UPDATE_ATTRS ] + [inode.id])
+                        [ getattr(inode, x) if x not in ('atime_ns','ctime_ns','mtime_ns') else u2s_ns(getattr(inode, x)) for x in UPDATE_ATTRS ] + [inode.id])
 
     def flush_id(self, id_):
         if id_ in self.attrs:
