@@ -12,6 +12,7 @@ on:
         value: ${{jobs.build.outputs.aname}}
       version:
         value: ${{jobs.build.outputs.version}}
+        
 
 jobs:
   build:
@@ -19,6 +20,7 @@ jobs:
     outputs:
       aname: ${{ steps.aname.outputs.artifactname }}
       version: ${{ steps.getversion.outputs.version }}
+      prevver: ${{ steps.build.outputs.prevver}}
     steps:
     - uses: actions/checkout@v3
     - id: getversion
@@ -32,7 +34,7 @@ jobs:
           import build.util
           
           with open(os.environ["GITHUB_OUTPUT"], "a+") as fout:
-            fout.write("{}={}".format("version",build.util.project_wheel_metadata(srcdir=".")["Version"]))
+            fout.write("version={}".format(build.util.project_wheel_metadata(srcdir=".")["Version"]))
         else:
           sys.exit(1)
     - id: build
@@ -48,6 +50,7 @@ jobs:
           python3 -m build
           pip3 install dist/s3ql-${{ steps.getversion.outputs.version }}.whl
           pip wheel -w ./dist -r requirements.txt
+          python3 -c 'import s3ql; print("prevver={}".format(s3ql.REV_VER_MAP[s3ql.CURRENT_FS_REV-1]))' >> ${GITHUB_OUTPUT}
     - id: test
       uses: addnab/docker-run-action@v3
       with:
@@ -55,11 +58,16 @@ jobs:
         options: -v ${{ github.workspace }}:/work --device=/dev/fuse --cap-add=SYS_ADMIN --security-opt apparmor:unconfined
         run: |
           apt update
-          apt -y install --no-install-recommends libsqlite3-0 libfuse3-3 python3-pip rsync fuse psmisc
+          apt -y install --no-install-recommends libsqlite3-0 libfuse3-3 python3-pip rsync fuse psmisc curl
           pip install --find-links /work/dist s3ql
           tar zxf /work/dist/s3ql-${{ steps.getversion.outputs.version }}.tar.gz
           cd s3ql-${{ steps.getversion.outputs.version }}
           rm -rf src
+          curl -sL https://github.com/s3ql/s3ql/releases/download/release-${{steps.build.outputs.prevver}}/s3ql-${{steps.build.outputs.prevver}}.tar.gz | tar ztf -
+          mv s3ql-${{steps.build.outputs.prevver}} s3ql.old
+          cd s3ql.old
+          python3 setup.py build_ext --inplace
+          cd ..
           pip install pytest_trio
           pytest tests
     - id: upload
