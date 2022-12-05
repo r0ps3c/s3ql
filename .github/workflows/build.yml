@@ -20,7 +20,6 @@ jobs:
     outputs:
       aname: ${{ steps.aname.outputs.artifactname }}
       version: ${{ steps.getversion.outputs.version }}
-      prevver: ${{ steps.build.outputs.prevver}}
     steps:
     - uses: actions/checkout@v3
     - id: getversion
@@ -51,7 +50,7 @@ jobs:
           python3 -m build
           pip3 install dist/s3ql-${{ steps.getversion.outputs.version }}.whl
           pip wheel -w ./dist -r requirements.txt
-          python3 -c \'import s3ql; print("prevver={}".format(s3ql.REV_VER_MAP[s3ql.CURRENT_FS_REV-1]))\' >> ${GITHUB_OUTPUT}
+          python3 -c 'import s3ql; print("prevver={}".format(s3ql.REV_VER_MAP[s3ql.CURRENT_FS_REV-1]))' > ./dist/prev-version
     - id: test
       uses: addnab/docker-run-action@v3
       with:
@@ -64,8 +63,9 @@ jobs:
           tar zxf /work/dist/s3ql-${{ steps.getversion.outputs.version }}.tar.gz
           cd s3ql-${{ steps.getversion.outputs.version }}
           rm -rf src
-          curl -sL https://github.com/s3ql/s3ql/releases/download/release-${{steps.build.outputs.prevver}}/s3ql-${{steps.build.outputs.prevver}}.tar.gz | tar ztf -
-          mv s3ql-${{steps.build.outputs.prevver}} s3ql.old
+          prevver=$(cat /work/dist/prev-version)
+          curl -sL https://github.com/s3ql/s3ql/releases/download/release-${prevver}/s3ql-${prevver}.tar.gz | tar ztf -
+          mv s3ql-${prevver} s3ql.old
           cd s3ql.old
           python3 setup.py build_ext --inplace
           cd ..
