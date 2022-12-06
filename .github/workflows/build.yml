@@ -40,30 +40,18 @@ jobs:
       uses: addnab/docker-run-action@v3
       with:
         image: ubuntu
-        options: -v ${{ github.workspace }}:/work
+        options: -v ${{ github.workspace }}:/work --device=/dev/fuse --cap-add=SYS_ADMIN --security-opt apparmor:unconfined
         shell: bash
         run: |
           apt update
-          apt -y install python3-pip python3-venv libsqlite3-dev pkg-config libfuse3-dev
+          apt -y install python3-pip python3-venv libsqlite3-dev pkg-config libfuse3-dev rsync fuse psmisc curl
           pip3 install build
           cd /work
           python3 -m build
           pip3 install dist/s3ql-${{ steps.getversion.outputs.version }}-*.whl
           pip wheel -w ./dist -r requirements.txt
-          python3 -c 'import s3ql; print("{}".format(s3ql.REV_VER_MAP[s3ql.CURRENT_FS_REV-1]))' > ./dist/prev-version
-    - id: test
-      uses: addnab/docker-run-action@v3
-      with:
-        image: ubuntu
-        options: -v ${{ github.workspace }}:/work --device=/dev/fuse --cap-add=SYS_ADMIN --security-opt apparmor:unconfined
-        run: |
-          apt update
-          apt -y install --no-install-recommends libsqlite3-0 libfuse3-3 python3-pip rsync fuse psmisc curl
-          pip install --find-links /work/dist s3ql
-          tar zxf /work/dist/s3ql-${{ steps.getversion.outputs.version }}.tar.gz
-          cd s3ql-${{ steps.getversion.outputs.version }}
+          prevver=$(python3 -c 'import s3ql; print("{}".format(s3ql.REV_VER_MAP[s3ql.CURRENT_FS_REV-1]))')
           rm -rf src
-          prevver=$(cat /work/dist/prev-version)
           curl -sL https://github.com/s3ql/s3ql/releases/download/release-${prevver}/s3ql-${prevver}.tar.gz | tar zxf -
           mv s3ql-${prevver} s3ql.old
           cd s3ql.old
