@@ -50,7 +50,7 @@ jobs:
           python3 -m build
           pip3 install dist/s3ql-${{ steps.getversion.outputs.version }}-*.whl
           pip wheel -w ./dist -r requirements.txt
-          python3 -c 'import s3ql; print("prevver={}".format(s3ql.REV_VER_MAP[s3ql.CURRENT_FS_REV-1]))' > ./dist/prev-version
+          python3 -c 'import s3ql; print("{}".format(s3ql.REV_VER_MAP[s3ql.CURRENT_FS_REV-1]))' > ./dist/prev-version
     - id: test
       uses: addnab/docker-run-action@v3
       with:
@@ -64,7 +64,7 @@ jobs:
           cd s3ql-${{ steps.getversion.outputs.version }}
           rm -rf src
           prevver=$(cat /work/dist/prev-version)
-          curl -sL https://github.com/s3ql/s3ql/releases/download/release-${prevver}/s3ql-${prevver}.tar.gz | tar ztf -
+          curl -sL https://github.com/s3ql/s3ql/releases/download/release-${prevver}/s3ql-${prevver}.tar.gz | tar zxf -
           mv s3ql-${prevver} s3ql.old
           cd s3ql.old
           python3 setup.py build_ext --inplace
