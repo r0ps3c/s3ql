@@ -1,6 +1,6 @@
 name: "build"
 
-on: 
+on:
   push:
     tags:
       - "!release-*"
@@ -14,7 +14,7 @@ on:
         value: ${{jobs.build.outputs.aname}}
       version:
         value: ${{jobs.build.outputs.version}}
-        
+
 
 jobs:
   build:
@@ -31,9 +31,9 @@ jobs:
 
         if not subprocess.call([sys.executable, '-m', 'pip', 'install','build']):
           sys.path.append(site.USER_SITE)
-          
+
           import build.util
-          
+
           with open(os.environ["GITHUB_OUTPUT"], "a+") as fout:
             fout.write("version={}".format(build.util.project_wheel_metadata(srcdir=".")["Version"]))
         else:
@@ -47,11 +47,11 @@ jobs:
         run: |
           apt update
           apt -y install python3-pip python3-venv libsqlite3-dev pkg-config libfuse3-dev rsync fuse psmisc curl
-          pip3 install build
+          pip3 install --ignore-installed build pip setuptools pytest_trio
           cd /work
           python3 -m build
           pip3 install dist/s3ql-${{ steps.getversion.outputs.version }}-*.whl
-          pip wheel -w ./dist -r requirements.txt
+          pip3 wheel -w ./dist -r requirements.txt
           prevver=$(python3 -c 'import s3ql; print("{}".format(s3ql.REV_VER_MAP[s3ql.CURRENT_FS_REV-1]))')
           rm -rf src
           curl -sL https://github.com/s3ql/s3ql/releases/download/release-${prevver}/s3ql-${prevver}.tar.gz | tar zxf -
@@ -59,7 +59,6 @@ jobs:
           cd s3ql.old
           python3 setup.py build_ext --inplace
           cd ..
-          pip install pytest_trio
           pytest tests
     - id: upload
       uses: actions/upload-artifact@v3

@@ -6,11 +6,13 @@ graft util
 graft bin
 include requirements.txt
 include Changes.txt
-include INSTALL.txt
-include README.txt
+include README.rst
 include LICENSE
+include src/s3ql/sqlite3ext.pyx
+exclude WARNING
 exclude MANIFEST.in
-prune tests/.*cache
+prune tests/.cache
+prune tests/.pytest_cache
 prune doc/doctrees
 prune src/dugong
 prune doc/man/.doctrees

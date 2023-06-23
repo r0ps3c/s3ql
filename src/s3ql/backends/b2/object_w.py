@@ -1,14 +1,14 @@
-import tempfile
 import hashlib
+import logging
+import tempfile
 
-from ...logging import logging
 from ..common import retry
-
 from .b2_error import BadDigestError
 
 log = logging.getLogger(__name__)
 
-class ObjectW(object):
+
+class ObjectW:
     '''A Backblaze B2 object open for writing
 
     All data is first cached in memory, upload only starts when
@@ -61,7 +61,7 @@ class ObjectW(object):
         self.headers['X-Bz-Content-Sha1'] = self.sha1.hexdigest()
 
         try:
-            response = self.backend._do_upload_request(self.headers, self.fh)
+            self.backend._do_upload_request(self.headers, self.fh)
         except BadDigestError:
             # delete may fail, but we don't want to loose the BadDigest exception
             try:

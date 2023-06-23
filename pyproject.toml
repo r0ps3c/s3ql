@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=45","wheel"]
+requires = ["setuptools>=45","wheel","cython"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -41,10 +41,10 @@ homepage = "https://github.com/s3ql/s3ql"
 releases = "https://github.com/s3ql/s3ql/releases"
 
 [tool.setuptools.exclude-package-data]
-s3ql = ["deltadump.c"]
+s3ql = ["sqlite3ext.cpp"]
 
 [tool.setuptools.package-data]
-s3ql = ["endian_indep.h"]
+s3ql = ["_sqlite3ext.cpp", "sqlite3ext.h"]
 
 [tool.setuptools.dynamic]
 version = {attr = "s3ql.VERSION"}

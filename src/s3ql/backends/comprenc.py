@@ -6,22 +6,22 @@ Copyright © 2008 Nikolaus Rath <Nikolaus@rath.org>
 This work can be distributed under the terms of the GNU GPLv3.
 '''
 
-from ..logging import logging # Ensure use of custom logger class
-from .. import BUFSIZE
-from .common import AbstractBackend, CorruptedObjectError, checksum_basic_mapping
-from ..common import ThawError, freeze_basic_mapping, thaw_basic_mapping
-from ..inherit_docstrings import (copy_ancestor_docstring, prepend_ancestor_docstring,
-                                  ABCDocstMeta)
-import cryptography.hazmat.primitives.ciphers as crypto_ciphers
-import cryptography.hazmat.backends as crypto_backends
 import bz2
 import hashlib
 import hmac
-import lzma
 import io
+import logging
+import lzma
 import struct
 import time
 import zlib
+
+import cryptography.hazmat.backends as crypto_backends
+import cryptography.hazmat.primitives.ciphers as crypto_ciphers
+
+from .. import BUFSIZE
+from ..common import ThawError, freeze_basic_mapping, thaw_basic_mapping
+from .common import AbstractBackend, CorruptedObjectError, checksum_basic_mapping
 
 log = logging.getLogger(__name__)
 
@@ -29,8 +29,10 @@ HMAC_SIZE = 32
 
 crypto_backend = crypto_backends.default_backend()
 
+
 def sha256(s):
     return hashlib.sha256(s).digest()
+
 
 def aes_encryptor(key):
     '''Return AES cipher in CTR mode for *key*'''
@@ -38,8 +40,10 @@ def aes_encryptor(key):
     cipher = crypto_ciphers.Cipher(
         crypto_ciphers.algorithms.AES(key),
         crypto_ciphers.modes.CTR(nonce=bytes(16)),
-        backend=crypto_backend)
+        backend=crypto_backend,
+    )
     return cipher.encryptor()
+
 
 def aes_decryptor(key):
     '''Return AES cipher in CTR mode for *key*'''
@@ -47,10 +51,12 @@ def aes_decryptor(key):
     cipher = crypto_ciphers.Cipher(
         crypto_ciphers.algorithms.AES(key),
         crypto_ciphers.modes.CTR(nonce=bytes(16)),
-        backend=crypto_backend)
+        backend=crypto_backend,
+    )
     return cipher.decryptor()
 
-class ComprencBackend(AbstractBackend, metaclass=ABCDocstMeta):
+
+class ComprencBackend(AbstractBackend):
     '''
     This class adds encryption, compression and integrity protection to a plain
     backend.
@@ -65,30 +71,20 @@ class ComprencBackend(AbstractBackend, metaclass=ABCDocstMeta):
         self.compression = compression
         self.backend = backend
 
-        if (compression[0] not in ('bzip2', 'lzma', 'zlib', None)
-            or compression[1] not in range(10)):
+        if compression[0] not in ('bzip2', 'lzma', 'zlib', None) or compression[1] not in range(10):
             raise ValueError('Unsupported compression: %s' % compression)
 
     @property
-    @copy_ancestor_docstring
-    def has_native_rename(self):
-        return self.backend.has_native_rename
-
-    @property
-    @copy_ancestor_docstring
     def has_delete_multi(self):
         return self.backend.has_delete_multi
 
-    @copy_ancestor_docstring
     def reset(self):
         self.backend.reset()
 
-    @copy_ancestor_docstring
     def lookup(self, key):
         meta_raw = self.backend.lookup(key)
         return self._verify_meta(key, meta_raw)[1]
 
-    @prepend_ancestor_docstring
     def get_size(self, key):
         '''
         This method returns the compressed size, i.e. the storage space
@@ -97,7 +93,6 @@ class ComprencBackend(AbstractBackend, metaclass=ABCDocstMeta):
 
         return self.backend.get_size(key)
 
-    @copy_ancestor_docstring
     def is_temp_failure(self, exc):
         return self.backend.is_temp_failure(exc)
 
@@ -121,7 +116,7 @@ class ComprencBackend(AbstractBackend, metaclass=ABCDocstMeta):
                 raise CorruptedObjectError('meta key %s is missing' % mkey)
 
         encr_alg = metadata['encryption']
-        encrypted = (encr_alg != 'None')
+        encrypted = encr_alg != 'None'
 
         if encrypted and self.passphrase is None:
             raise CorruptedObjectError('Encrypted object and no passphrase supplied')
@@ -150,8 +145,9 @@ class ComprencBackend(AbstractBackend, metaclass=ABCDocstMeta):
             raise CorruptedObjectError('HMAC mismatch')
 
         if stored_key != key:
-            raise CorruptedObjectError('Object content does not match its key (%s vs %s)'
-                                       % (stored_key, key))
+            raise CorruptedObjectError(
+                'Object content does not match its key (%s vs %s)' % (stored_key, key)
+            )
 
         decryptor = aes_decryptor(meta_key)
         buf = decryptor.update(meta_buf) + decryptor.finalize()
@@ -161,7 +157,6 @@ class ComprencBackend(AbstractBackend, metaclass=ABCDocstMeta):
         except ThawError:
             raise CorruptedObjectError('Invalid metadata')
 
-    @prepend_ancestor_docstring
     def open_read(self, key):
         """
         If the backend has a password set but the object is not encrypted,
@@ -197,7 +192,7 @@ class ComprencBackend(AbstractBackend, metaclass=ABCDocstMeta):
             elif compr_alg == 'LZMA':
                 fh = DecompressFilter(fh, lzma.LZMADecompressor())
             elif compr_alg == 'ZLIB':
-                fh = DecompressFilter(fh,zlib.decompressobj())
+                fh = DecompressFilter(fh, zlib.decompressobj())
             elif compr_alg != 'None':
                 raise RuntimeError('Unsupported compression: %s' % compr_alg)
 
@@ -210,7 +205,6 @@ class ComprencBackend(AbstractBackend, metaclass=ABCDocstMeta):
 
         return fh
 
-    @copy_ancestor_docstring
     def open_write(self, key, metadata=None, is_compressed=False):
 
         if metadata is None:
@@ -257,73 +251,23 @@ class ComprencBackend(AbstractBackend, metaclass=ABCDocstMeta):
 
         return fh
 
-    @copy_ancestor_docstring
     def contains(self, key):
         return self.backend.contains(key)
 
-    @copy_ancestor_docstring
     def delete(self, key, force=False):
         return self.backend.delete(key, force)
 
-    @copy_ancestor_docstring
     def delete_multi(self, keys, force=False):
         return self.backend.delete_multi(keys, force=force)
 
-    @copy_ancestor_docstring
     def list(self, prefix=''):
         return self.backend.list(prefix)
 
-    @copy_ancestor_docstring
-    def update_meta(self, key, metadata):
-        if not isinstance(metadata, dict):
-            raise TypeError('*metadata*: expected dict, got %s' % type(metadata))
-        self._copy_or_rename(src=key, dest=key, rename=False,
-                             metadata=metadata)
-
-    @copy_ancestor_docstring
-    def copy(self, src, dest, metadata=None):
-        if not (metadata is None or isinstance(metadata, dict)):
-            raise TypeError('*metadata*: expected dict or None, got %s' % type(metadata))
-        self._copy_or_rename(src, dest, rename=False, metadata=metadata)
-
-    @copy_ancestor_docstring
-    def rename(self, src, dest, metadata=None):
-        if not (metadata is None or isinstance(metadata, dict)):
-            raise TypeError('*metadata*: expected dict or None, got %s' % type(metadata))
-        self._copy_or_rename(src, dest, rename=True, metadata=metadata)
-
-    def _copy_or_rename(self, src, dest, rename, metadata=None):
-        meta_raw = self.backend.lookup(src)
-        (nonce, meta_old) = self._verify_meta(src, meta_raw)
-
-        if nonce:
-            meta_key = sha256(self.passphrase + nonce + b'meta')
-            if metadata is None:
-                meta_buf = freeze_basic_mapping(meta_old)
-            else:
-                meta_buf = freeze_basic_mapping(metadata)
-            encryptor = aes_encryptor(meta_key)
-            meta_raw['data'] = encryptor.update(meta_buf) + encryptor.finalize()
-            meta_raw['object_id'] = dest
-            meta_raw['signature'] = checksum_basic_mapping(meta_raw, meta_key)
-        elif metadata is None:
-            # Just copy old metadata
-            meta_raw = None
-        else:
-            meta_raw['data'] = freeze_basic_mapping(metadata)
-
-        if src == dest: # metadata update only
-            self.backend.update_meta(src, meta_raw)
-        elif rename:
-            self.backend.rename(src, dest, metadata=meta_raw)
-        else:
-            self.backend.copy(src, dest, metadata=meta_raw)
-
-    @copy_ancestor_docstring
     def close(self):
         self.backend.close()
 
-class CompressFilter(object):
+
+class CompressFilter:
     '''Compress data while writing'''
 
     def __init__(self, fh, compr):
@@ -371,6 +315,7 @@ class CompressFilter(object):
             raise RuntimeError('Object must be closed first.')
         return self.obj_size
 
+
 class InputFilter(io.RawIOBase):
 
     # Overwrite default implementation to make sure that we're using a decent
@@ -391,7 +336,7 @@ class InputFilter(io.RawIOBase):
 
     def readinto(self, buf):
         var = self.read(len(buf))
-        buf[:len(var)] = var
+        buf[: len(var)] = var
         return var
 
     def read(self, size=-1):
@@ -409,6 +354,7 @@ class InputFilter(io.RawIOBase):
             buf = self.fh.read(BUFSIZE)
             if not buf:
                 break
+
 
 class DecompressFilter(InputFilter):
     '''Decompress data while reading'''
@@ -470,7 +416,7 @@ class DecompressFilter(InputFilter):
         return False
 
 
-class EncryptFilter(object):
+class EncryptFilter:
     '''Encrypt data while writing'''
 
     def __init__(self, fh, key):
@@ -554,7 +500,7 @@ class DecryptFilter(InputFilter):
         super().__init__()
 
         self.fh = fh
-        self.remaining = 0 # Remaining length of current packet
+        self.remaining = 0  # Remaining length of current packet
         self.metadata = metadata
         self.hmac_checked = False
         self.decryptor = aes_decryptor(key)
@@ -607,7 +553,7 @@ class DecryptFilter(InputFilter):
             # but make sure not to stop in packet header (so that we don't
             # cache the partially read header from one invocation to the next).
             to_next = self.remaining + self.off_size
-            if (not inbuf or len(inbuf) < to_next):
+            if not inbuf or len(inbuf) < to_next:
                 if not inbuf:
                     buf = self._read_and_decrypt(size - len(outbuf))
                     if not buf:
@@ -620,9 +566,9 @@ class DecryptFilter(InputFilter):
 
             # Copy rest of current packet to output and start reading
             # from next packet
-            outbuf += inbuf[:self.remaining]
+            outbuf += inbuf[: self.remaining]
             self.hmac.update(inbuf[:to_next])
-            paket_size = struct.unpack(b'<I', inbuf[self.remaining:to_next])[0]
+            paket_size = struct.unpack(b'<I', inbuf[self.remaining : to_next])[0]
             inbuf = inbuf[to_next:]
             self.remaining = paket_size
 
@@ -631,7 +577,7 @@ class DecryptFilter(InputFilter):
                 while len(inbuf) < HMAC_SIZE:
                     # Don't read exactly the missing amount, we wan't to detect
                     # if there's extraneous data
-                    buf = self._read_and_decrypt(HMAC_SIZE+1)
+                    buf = self._read_and_decrypt(HMAC_SIZE + 1)
                     assert buf
                     inbuf += buf
 
@@ -659,6 +605,7 @@ class DecryptFilter(InputFilter):
         self.close()
         return False
 
+
 def decompress(decomp, buf):
     '''Decompress *buf* using *decomp*
 
@@ -673,14 +620,16 @@ def decompress(decomp, buf):
             raise CorruptedObjectError('Invalid compressed stream')
         raise
     except lzma.LZMAError as exc:
-        if (exc.args[0].lower().startswith('corrupt input data')
-            or exc.args[0].startswith('Input format not supported')):
+        if exc.args[0].lower().startswith('corrupt input data') or exc.args[0].startswith(
+            'Input format not supported'
+        ):
             raise CorruptedObjectError('Invalid compressed stream')
         raise
     except zlib.error as exc:
         if exc.args[0].lower().startswith('error -3 while decompressing'):
             raise CorruptedObjectError('Invalid compressed stream')
         raise
+
 
 class ObjectNotEncrypted(Exception):
     '''
