@@ -54,7 +54,7 @@ jobs:
           pip3 wheel -w ./dist -r requirements.txt
           prevver=$(python3 -c 'import s3ql; print("{}".format(s3ql.REV_VER_MAP[s3ql.CURRENT_FS_REV-1]))')
           rm -rf src
-          curl -sL https://github.com/s3ql/s3ql/releases/download/release-${prevver}/s3ql-${prevver}.tar.gz | tar zxf -
+          curl -sL https://github.com/r0ps3c/s3ql/releases/download/release-${prevver}/s3ql-${prevver}.tar.gz | tar zxf -
           mv s3ql-${prevver} s3ql.old
           cd s3ql.old
           python3 setup.py build_ext --inplace
