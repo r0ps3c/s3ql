@@ -109,7 +109,7 @@ class cache_tests(unittest.TestCase):
 
     def test_filetimes(self):
 
-        for testtime in (2, 2 ** 63):
+        for testtime in (0, 2, 2 ** 63):
 
             attrs = {'mode': 784,
                     'refcount': 3,
