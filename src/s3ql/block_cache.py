@@ -6,11 +6,9 @@ Copyright © 2008 Nikolaus Rath <Nikolaus@rath.org>
 This work can be distributed under the terms of the GNU GPLv3.
 '''
 
-import hashlib
 import logging
 import os
 import re
-import shutil
 import sys
 import threading
 import time
@@ -19,10 +17,12 @@ from collections import OrderedDict
 from queue import Empty as QueueEmpty
 from queue import Full as QueueFull
 from queue import Queue
+from typing import Optional
 
 import trio
 
-from . import BUFSIZE
+from s3ql.common import sha256_fh
+
 from .backends.common import NoSuchObject
 from .database import NoSuchRowError
 from .multi_lock import MultiLock
@@ -198,7 +198,7 @@ class BlockCache:
         else:
             os.mkdir(self.path)
 
-        # Initialized fromt the outside to prevent cyclic dependency,
+        # Initialized from the outside to prevent cyclic dependency,
         # used only to set failsafe attribute
         self.fs = Namespace()
 
@@ -286,15 +286,13 @@ class BlockCache:
             t.join()
 
         assert len(self.in_transit) == 0
-        if self.to_remove:
-            try:
-                while self.to_remove.get_nowait() is QuitSentinel:
-                    pass
-            except QueueEmpty:
+        try:
+            while self.to_remove.get_nowait() is QuitSentinel:
                 pass
-            else:
-                log.error('Could not complete object removals, '
-                        'no removal threads left alive')
+        except QueueEmpty:
+            pass
+        else:
+            log.error('Could not complete object removals, no removal threads left alive')
 
         self.to_upload = None
         self.to_remove = None
@@ -329,15 +327,6 @@ class BlockCache:
         This method runs in a separate thread outside the trio event loop.
         '''
 
-        def do_write(fh):
-            el.seek(0)
-            while True:
-                buf = el.read(BUFSIZE)
-                if not buf:
-                    break
-                fh.write(buf)
-            return fh
-
         success = False
 
         async def with_event_loop(exc_info):
@@ -352,7 +341,7 @@ class BlockCache:
                 # to be de-duplicated against this (missing) one. However, this
                 # may already have happened during the attempted upload. The
                 # only way to avoid this problem is to insert the hash into the
-                # objects table *after* successfull upload. But this would open
+                # objects table *after* successful upload. But this would open
                 # a window without de-duplication just to handle the special
                 # case of an upload failing.
                 #
@@ -377,18 +366,15 @@ class BlockCache:
 
         try:
             with self.backend_pool() as backend:
+                el.seek(0)
                 if log.isEnabledFor(logging.DEBUG):
                     time_ = time.time()
-                    obj_size = backend.perform_write(
-                        do_write, 's3ql_data_%d' % obj_id
-                    ).get_obj_size()
+                    obj_size = backend.write_fh('s3ql_data_%d' % obj_id, el)
                     time_ = time.time() - time_
                     rate = el.size / (1024**2 * time_) if time_ != 0 else 0
                     log.debug('uploaded %d bytes in %.3f seconds, %.2f MiB/s', el.size, time_, rate)
                 else:
-                    obj_size = backend.perform_write(
-                        do_write, 's3ql_data_%d' % obj_id
-                    ).get_obj_size()
+                    obj_size = backend.write_fh('s3ql_data_%d' % obj_id, el)
             success = True
         finally:
             self.in_transit.remove(el)
@@ -444,19 +430,9 @@ class BlockCache:
             log.debug('uploading %s..', el)
             self.in_transit.add(el)
             added_to_transit = True
-            sha = hashlib.sha256()
             el.seek(0)
-
-            def with_lock_released():
-                while True:
-                    buf = el.read(BUFSIZE)
-                    if not buf:
-                        break
-                    sha.update(buf)
-                return sha.digest()
-
-            hash_ = await trio.to_thread.run_sync(with_lock_released)
-
+            sha = await trio.to_thread.run_sync(sha256_fh, el)
+            hash_ = sha.digest()
         except:
             if added_to_transit:
                 self.in_transit.discard(el)
@@ -653,11 +629,32 @@ class BlockCache:
                     self.fs.failsafe = True
 
     @asynccontextmanager
-    async def get(self, inode, blockno):
-        """Get file handle for block `blockno` of `inode`."""
+    async def get(self, inode, blockno, max_write: Optional[int] = None):
+        """Get file handle for block `blockno` of `inode`
+
+        If *max_write* is not None, caller promises not to write into the
+        cache element beyond offset *max_write*.
+        """
 
         # log.debug('started with %d, %d', inode, blockno)
 
+        # Fast path: in cache and will not change size (so we do not need to worry about cache
+        # expiration). The `while` statement does not actually loop, we just use it so we can
+        # use `break` to jump out.
+        while max_write is not None:
+            async with self.mlock(inode, blockno):
+                try:
+                    el = self.cache[(inode, blockno)]
+                except KeyError:
+                    break
+                if max_write >= el.size:
+                    break
+                self.cache.move_to_end((inode, blockno), last=True)  # move to head
+                yield el
+                return
+
+        # Slow path - object is not yet cached or cached but will increase in size. Therefore, need
+        # to make sure there's enough room in the cache.
         if self.cache.is_full():
             await self.expire()
 
@@ -706,12 +703,6 @@ class BlockCache:
             log.debug('downloading object %d..', obj_id)
             tmpfh = open(filename + '.tmp', 'wb')
             try:
-
-                def do_read(fh):
-                    tmpfh.seek(0)
-                    tmpfh.truncate()
-                    shutil.copyfileobj(fh, tmpfh, BUFSIZE)
-
                 # Lock object. This ensures that we wait until the object
                 # is uploaded. We don't have to worry about deletion, because
                 # as long as the current cache entry exists, there will always be
@@ -722,7 +713,7 @@ class BlockCache:
 
                 def with_lock_released():
                     with self.backend_pool() as backend:
-                        backend.perform_read(do_read, 's3ql_data_%d' % obj_id)
+                        backend.readinto_fh('s3ql_data_%d' % obj_id, tmpfh)
 
                 await trio.to_thread.run_sync(with_lock_released)
 
