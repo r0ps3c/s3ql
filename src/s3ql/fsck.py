@@ -16,20 +16,32 @@ import stat
 import sys
 import textwrap
 import time
+from datetime import datetime
 from os.path import basename
+from tempfile import NamedTemporaryFile
 
 import apsw
 
-from . import BUFSIZE, CTRL_INODE, ROOT_INODE
+from . import CTRL_INODE, CURRENT_FS_REV, ROOT_INODE
 from .backends.common import NoSuchObject
 from .backends.comprenc import ComprencBackend
 from .backends.local import Backend as LocalBackend
-from .common import get_backend, get_path, inode_for_path, is_mounted, sha256_fh, time_ns
+from .common import (
+    get_backend,
+    get_path,
+    inode_for_path,
+    is_mounted,
+    sha256_fh,
+    thaw_basic_mapping,
+    time_ns,
+)
 from .database import (
     Connection,
+    FsAttributes,
     NoSuchRowError,
     download_metadata,
     expire_objects,
+    get_available_seq_nos,
     read_cached_params,
     read_remote_params,
     upload_metadata,
@@ -54,7 +66,6 @@ S_IFMT = (
 
 class Fsck:
     def __init__(self, cachedir_, backend_, param, conn):
-
         self.cachedir = cachedir_
         self.backend = backend_
         self.expect_errors = False
@@ -179,7 +190,7 @@ class Fsck:
         candidates = os.listdir(self.cachedir)
 
         total = len(candidates)
-        for (i, filename) in enumerate(candidates):
+        for i, filename in enumerate(candidates):
             i += 1  # start at 1
 
             log.info(
@@ -241,14 +252,8 @@ class Fsck:
                     (size, hash_should),
                 )
 
-                def do_write(obj_fh):
-                    with open(os.path.join(self.cachedir, filename), "rb") as fh:
-                        shutil.copyfileobj(fh, obj_fh, BUFSIZE)
-                    return obj_fh
-
-                obj_size = self.backend.perform_write(
-                    do_write, 's3ql_data_%d' % obj_id
-                ).get_obj_size()
+                with open(os.path.join(self.cachedir, filename), "rb") as fh:
+                    obj_size = self.backend.write_fh('s3ql_data_%d' % obj_id, fh)
 
                 self.conn.execute('UPDATE objects SET phys_size=? WHERE id=?', (obj_size, obj_id))
             else:
@@ -345,7 +350,7 @@ class Fsck:
 
         log.info('Checking contents (names)...')
 
-        for (rowid, name_id, inode_p, inode) in self.conn.query(
+        for rowid, name_id, inode_p, inode in self.conn.query(
             'SELECT contents.rowid, name_id, parent_inode, inode '
             'FROM contents LEFT JOIN names ON %(dbf)sname_id = %(dbf)snames.id '
             'WHERE %(dbf)snames.id IS NULL' % self.conn.fixes
@@ -377,7 +382,7 @@ class Fsck:
 
         log.info('Checking contents (parent inodes)...')
 
-        for (rowid, inode_p, name_id) in self.conn.query(
+        for rowid, inode_p, name_id in self.conn.query(
             'SELECT contents.rowid, parent_inode, name_id '
             'FROM contents LEFT JOIN inodes '
             'ON %(dbf)sparent_inode = %(dbf)sinodes.id '
@@ -404,7 +409,7 @@ class Fsck:
         log.info('Checking contents (inodes)...')
 
         to_delete = list()
-        for (rowid, inode_p, inode, name_id) in self.conn.query(
+        for rowid, inode_p, inode, name_id in self.conn.query(
             'SELECT contents.rowid, parent_inode, inode, '
             'name_id FROM contents LEFT JOIN inodes '
             'ON %(dbf)sinode = %(dbf)sinodes.id '
@@ -428,15 +433,14 @@ class Fsck:
 
         log.info('Checking extended attributes (names)...')
 
-        for (rowid, name_id, inode) in self.conn.query(
+        for rowid, name_id, inode in self.conn.query(
             'SELECT ext_attributes.rowid, name_id, inode '
             'FROM ext_attributes LEFT JOIN names '
             'ON %(dbf)sname_id = %(dbf)snames.id '
             'WHERE %(dbf)snames.id IS NULL' % self.conn.fixes
         ):
-
             self.found_errors = True
-            for (name, id_p) in self.conn.query(
+            for name, id_p in self.conn.query(
                 'SELECT name, parent_inode FROM contents_v WHERE inode=?', (inode,)
             ):
                 path = get_path(id_p, self.conn, name)
@@ -465,7 +469,7 @@ class Fsck:
         log.info('Checking extended attributes (inodes)...')
 
         to_delete = list()
-        for (rowid, inode, name_id) in self.conn.query(
+        for rowid, inode, name_id in self.conn.query(
             'SELECT ext_attributes.rowid, inode, name_id '
             'FROM ext_attributes LEFT JOIN inodes '
             'ON %(dbf)sinode = %(dbf)sinodes.id '
@@ -576,8 +580,7 @@ class Fsck:
                 WHERE size < min_size'''
             )
 
-            for (id_, size_old, size) in self.conn.query('SELECT * FROM wrong_sizes'):
-
+            for id_, size_old, size in self.conn.query('SELECT * FROM wrong_sizes'):
                 self.found_errors = True
                 self.log_error(
                     "Size of inode %d (%s) does not agree with number of blocks, "
@@ -617,7 +620,7 @@ class Fsck:
                 % self.conn.fixes
             )
 
-            for (id_, cnt, cnt_old) in self.conn.query('SELECT * FROM wrong_refcounts'):
+            for id_, cnt, cnt_old in self.conn.query('SELECT * FROM wrong_refcounts'):
                 # No checks for root and control
                 if id_ in (ROOT_INODE, CTRL_INODE):
                     continue
@@ -653,7 +656,7 @@ class Fsck:
         log.info('Checking inode_blocks.inode...')
 
         to_delete = list()
-        for (rowid, inode, obj_id) in self.conn.query(
+        for rowid, inode, obj_id in self.conn.query(
             'SELECT inode_blocks.rowid, inode, obj_id '
             'FROM inode_blocks LEFT JOIN inodes '
             'ON %(dbf)sinode = %(dbf)sinodes.id '
@@ -679,7 +682,7 @@ class Fsck:
         log.info('Checking block-object mapping...')
 
         to_delete = list()
-        for (rowid, obj_id, inode) in self.conn.query(
+        for rowid, obj_id, inode in self.conn.query(
             'SELECT inode_blocks.rowid, obj_id, inode FROM inode_blocks '
             'LEFT JOIN objects ON %(dbf)sobj_id = %(dbf)sobjects.id '
             'WHERE %(dbf)sobjects.id IS NULL' % self.conn.fixes
@@ -695,7 +698,7 @@ class Fsck:
                     'SELECT name, name_id, parent_inode FROM contents_v WHERE inode=?', (inode,)
                 )
             )
-            for (name, name_id, id_p) in affected_entries:
+            for name, name_id, id_p in affected_entries:
                 path = get_path(id_p, self.conn, name)
                 self.log_error("File may lack data, moved to /lost+found: %s", to_str(path))
                 (lof_id, newname) = self.resolve_free(b"/lost+found", escape(path))
@@ -716,7 +719,7 @@ class Fsck:
         log.info('Checking symlinks (inodes)...')
 
         to_delete = list()
-        for (rowid, inode) in self.conn.query(
+        for rowid, inode in self.conn.query(
             'SELECT symlink_targets.rowid, inode FROM symlink_targets '
             'LEFT JOIN inodes ON %(dbf)sinode = %(dbf)sinodes.id '
             'WHERE %(dbf)sinodes.id IS NULL' % self.conn.fixes
@@ -797,7 +800,7 @@ class Fsck:
                 % self.conn.fixes
             )
 
-            for (id_, cnt, cnt_old) in self.conn.query('SELECT * FROM wrong_refcounts'):
+            for id_, cnt, cnt_old in self.conn.query('SELECT * FROM wrong_refcounts'):
                 self.found_errors = True
                 if cnt is None:
                     self.log_error(
@@ -836,11 +839,10 @@ class Fsck:
 
         log.info('Checking unix conventions...')
 
-        for (inode, mode, size, target, rdev) in self.conn.query(
+        for inode, mode, size, target, rdev in self.conn.query(
             "SELECT id, mode, size, target, rdev "
             "FROM inodes LEFT JOIN symlink_targets ON id = inode"
         ):
-
             has_children = self.conn.has_val(
                 'SELECT 1 FROM contents WHERE parent_inode=? LIMIT 1', (inode,)
             )
@@ -931,7 +933,7 @@ class Fsck:
                     to_str(get_path(inode, self.conn)),
                 )
 
-        for (name, id_p) in self.conn.query(
+        for name, id_p in self.conn.query(
             'SELECT name, parent_inode FROM contents_v WHERE LENGTH(name) > 255'
         ):
             path = get_path(id_p, self.conn, name)
@@ -967,7 +969,7 @@ class Fsck:
                 % self.conn.fixes
             )
 
-            for (id_, cnt, cnt_old) in self.conn.query('SELECT * FROM wrong_refcounts'):
+            for id_, cnt, cnt_old in self.conn.query('SELECT * FROM wrong_refcounts'):
                 if cnt is None and id_ in self.unlinked_objects and cnt_old == 0:
                     # Object was unlinked by check_cache
                     self.conn.execute('DELETE FROM objects WHERE id=?', (id_,))
@@ -999,7 +1001,7 @@ class Fsck:
         """Remove temporary objects"""
 
         # Tests may provide a plain backend directly, but in regular operation
-        # we'll always work with a ComprencBackend (even if there is neiter
+        # we'll always work with a ComprencBackend (even if there is neither
         # compression nor encryption)
         if isinstance(self.backend, ComprencBackend):
             plain_backend = self.backend.backend
@@ -1160,7 +1162,6 @@ class Fsck:
 
 
 def parse_args(args):
-
     parser = ArgumentParser(description="Checks and repairs an S3QL filesystem.")
 
     parser.add_log('~/.s3ql/fsck.log')
@@ -1202,7 +1203,6 @@ def parse_args(args):
 
 
 def main(args=None):
-
     if args is None:
         args = sys.argv[1:]
 
@@ -1223,22 +1223,18 @@ def main(args=None):
     cachepath = options.cachepath
     db = None
 
-    local_param = read_cached_params(cachepath)
     param = read_remote_params(backend)
+    local_param = read_cached_params(cachepath, min_seq=param.seq_no)
     if local_param is not None:
-        assert os.path.exists(cachepath + '.db')
-        if local_param.seq_no >= param.seq_no:
-            log.info('Using cached metadata.')
-            param = local_param
-            db = Connection(cachepath + '.db', param.metadata_block_size)
-            if param.is_mounted:
-                log.info('File system was not unmounted cleanly')
-                param.needs_fsck = True
-            if local_param.seq_no > param.seq_no:
-                log.info('Remote metadata is outdated.')
-                param.needs_fsck = True
-        else:
-            log.info('Ignoring locally cached metadata (outdated).')
+        log.info('Using cached metadata.')
+        param = local_param
+        db = Connection(cachepath + '.db', param.metadata_block_size)
+        if param.is_mounted:
+            log.info('File system was not unmounted cleanly')
+            param.needs_fsck = True
+        if local_param.seq_no > param.seq_no:
+            log.info('Remote metadata is outdated.')
+            param.needs_fsck = True
 
     if param.is_mounted and local_param is not param:
         print(
@@ -1251,7 +1247,7 @@ def main(args=None):
 
               You may also continue and use whatever metadata is available in the backend.
               However, in that case YOU MAY LOOSE ALL DATA THAT HAS BEEN UPLOADED OR MODIFIED
-              SINCE THE LAST SUCCESSFULL METADATA UPLOAD. Moreover, files and directories that
+              SINCE THE LAST SUCCESSFUL METADATA UPLOAD. Moreover, files and directories that
               you have deleted since then MAY REAPPEAR WITH SOME OF THEIR CONTENT LOST.
               '''
                 )
@@ -1319,7 +1315,15 @@ def main(args=None):
     if not db:
         # When file system was not unmounted cleanly, the checksum and size may not have been
         # updated.
+        log.info('Downloading metadata...')
         db = download_metadata(backend, cachepath + '.db', param, failsafe=param.is_mounted)
+
+        # Don't download the same metadata again in verify_metadata_snapshots
+        check_current_metadata = False
+    else:
+        # If the filesystem was not unmounted cleanly, do not bother to check the
+        # current remote metadata (it's most likely inconsistent).
+        check_current_metadata = not param.is_mounted
 
     log.info('Checking DB integrity...')
     try:
@@ -1335,6 +1339,9 @@ def main(args=None):
             'then re-run fsck.s3ql',
             exitcode=43,
         )
+
+    # To detect bugs in S3QL, make sure we can correctly download the last few metadata snapshots.
+    verify_metadata_snapshots(backend, count=5, include_most_recent=check_current_metadata)
 
     param.is_mounted = True
     param.seq_no += 1
@@ -1353,21 +1360,27 @@ def main(args=None):
             'Please report this to the S3QL mailing list, http://groups.google.com/group/s3ql'
         )
 
+    # If the filesystem was not unmounted cleanly, the database may have changes that have not
+    # been uploaded yet are not tracked through the VFS, so we need to do a full upload. Just
+    # to be sure, we also do a full upload if we found any errors.
+    if param.needs_fsck or fsck.found_errors:
+        full_upload = True
+    else:
+        full_upload = False
+
     param.needs_fsck = False
     param.is_mounted = False
     param.last_fsck = time.time()
     param.last_modified = time.time()
 
-    # Since we're uploading the full database anyway, might as well try
-    # to reduce the size.
-    db.execute('VACUUM')
-
-    db.close()
-
-    # If the filesystem was not unmounted cleanly, the database may have changes
-    # that have not been uploaded yet are not tracked through the VFS. Therefore,
-    # always upload the full metadata in fsck.
-    upload_metadata(backend, db, param, incremental=False)
+    if full_upload:
+        # This is a good time to reduce DB size if possible
+        db.execute('VACUUM')
+        db.close()
+        upload_metadata(backend, db, param, incremental=False)
+    else:
+        db.close()
+        upload_metadata(backend, db, param, incremental=True)
 
     write_params(cachepath, param)
     upload_params(backend, param)
@@ -1392,6 +1405,48 @@ def to_str(name):
     '''Decode path name for printing'''
 
     return str(name, encoding='utf-8', errors='replace')
+
+
+def verify_metadata_snapshots(backend, count: int = 5, include_most_recent: bool = True):
+    '''Verify the last *count* metadata snapshots.'''
+
+    log.info('Verifying consistency of most recent metadata backups:')
+    backups = sorted(get_available_seq_nos(backend), reverse=True)
+
+    if not backups:
+        raise RuntimeError(
+            'No metadata backups found. This should not happen, please report a bug.'
+        )
+
+    if include_most_recent:
+        to_check = backups[:count]
+    else:
+        to_check = backups[1 : count + 1]
+
+    for seq_no in to_check:
+        # De-serialize directly instead of using read_remote_params() to avoid
+        # exceptions on old filesystem revisions.
+        d = thaw_basic_mapping(backend['s3ql_params_%010x' % seq_no])
+        if d['revision'] != CURRENT_FS_REV:
+            break
+        params = FsAttributes(**d)
+        assert params.seq_no == seq_no
+        date = datetime.fromtimestamp(params.last_modified).strftime('%Y-%m-%d %H:%M:%S')
+        if params.is_mounted:
+            log.info(
+                'Skipping check of backup %010x (from %s): not unmounted cleanly.', seq_no, date
+            )
+            continue
+        log.info('Checking backup %010x (from %s)...', seq_no, date)
+        with NamedTemporaryFile() as fh:
+            conn = download_metadata(backend, fh.name, params)
+            res = conn.get_list('PRAGMA integrity_check(20)')
+            if res[0][0] != 'ok':
+                log.error('\n'.join(x[0] for x in res))
+                raise RuntimeError(
+                    'Metadata backup is corrupted. Please report this as a bug',
+                )
+            conn.close()
 
 
 if __name__ == '__main__':

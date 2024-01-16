@@ -45,6 +45,7 @@ from s3ql.mkfs import init_tables
 # We need to access to protected members
 # pylint: disable=W0212
 
+
 # The classes provided by pyfuse3 have read-only attributes,
 # so we duck-type our own.
 class Ctx:
@@ -218,7 +219,7 @@ async def test_getxattr(ctx):
     await ctx.server.release(fh)
 
     with assert_raises(FUSEError):
-        await ctx.server.getxattr(inode.st_ino, b'nonexistant-attr', some_ctx)
+        await ctx.server.getxattr(inode.st_ino, b'nonexistent-attr', some_ctx)
 
     await ctx.server.setxattr(inode.st_ino, b'my-attr', b'strabumm!', some_ctx)
     assert await ctx.server.getxattr(inode.st_ino, b'my-attr', some_ctx) == b'strabumm!'
@@ -280,7 +281,6 @@ async def test_listxattr(ctx):
 
 
 async def test_read(ctx):
-
     len_ = ctx.max_obj_size
     data = random_data(len_)
     off = ctx.max_obj_size // 2
@@ -303,7 +303,6 @@ async def test_read(ctx):
 
 
 async def test_readdir(ctx, monkeypatch):
-
     # Create a few entries
     names = [('entry_%2d' % i).encode() for i in range(20)]
     for name in names:
@@ -312,7 +311,7 @@ async def test_readdir(ctx, monkeypatch):
         await ctx.server.release(fh)
         await ctx.server.forget([(inode.st_ino, 1)])
 
-    # Delete some to make sure that we don't have continous rowids
+    # Delete some to make sure that we don't have continuous rowids
     remove_no = [0, 2, 3, 5, 9]
     for i in remove_no:
         await ctx.server.unlink(ROOT_INODE, names[i], some_ctx)
@@ -618,6 +617,25 @@ async def test_setattr_two(ctx):
     ):
         assert getattr(inode_old, name) == getattr(inode_new, name)
     assert inode_old.st_ctime_ns < inode_new.st_ctime_ns
+
+    await ctx.server.release(fh)
+    await ctx.server.forget([(inode_old.st_ino, 1)])
+    await fsck(ctx)
+
+
+async def test_setattr_large(ctx):
+    (fi, inode_old) = await ctx.server.create(
+        ROOT_INODE, newname(ctx), file_mode(), os.O_RDWR, some_ctx
+    )
+    fh = fi.fh
+
+    attr = await ctx.server.getattr(inode_old.st_ino, some_ctx)
+    attr.st_mtime_ns = int(2**63 + 1)
+    sf = SetattrFields(update_mtime=True)
+
+    with pytest.raises(FUSEError) as exc:
+        await ctx.server.setattr(inode_old.st_ino, attr, sf, None, some_ctx)
+    assert exc.value.errno == errno.EINVAL
 
     await ctx.server.release(fh)
     await ctx.server.forget([(inode_old.st_ino, 1)])
@@ -1102,7 +1120,6 @@ async def test_copy_tree_2(ctx, monkeypatch):
 
 
 async def test_lock_tree(ctx):
-
     inode1 = await ctx.server.mkdir(ROOT_INODE, b'source', dir_mode(), some_ctx)
 
     # Create file
@@ -1188,7 +1205,6 @@ async def test_lock_tree(ctx):
 
 
 async def test_remove_tree(ctx, monkeypatch):
-
     inode1 = await ctx.server.mkdir(ROOT_INODE, b'source', dir_mode(), some_ctx)
 
     # Create file
@@ -1213,7 +1229,7 @@ async def test_remove_tree(ctx, monkeypatch):
     monkeypatch.setattr('pyfuse3.invalidate_entry', lambda *args: None)
     await ctx.server.remove_tree(ROOT_INODE, b'source')
 
-    for (id_p, name) in (
+    for id_p, name in (
         (ROOT_INODE, b'source'),
         (inode1.st_ino, b'file1'),
         (inode1.st_ino, b'dir1'),

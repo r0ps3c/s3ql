@@ -1,9 +1,8 @@
 cryptography
 defusedxml
 requests
-apsw>=3.7.0
+apsw>=3.42.0
 trio>=0.15
-dugong>=3.4,<4.0
 google-auth
 google-auth-oauthlib
 pyfuse3>=3.2.2,<4.0

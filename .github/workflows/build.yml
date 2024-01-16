@@ -35,7 +35,7 @@ jobs:
           import build.util
 
           with open(os.environ["GITHUB_OUTPUT"], "a+") as fout:
-            fout.write("version={}".format(build.util.project_wheel_metadata(srcdir=".")["Version"]))
+            fout.write("version={}".format(build.util.project_wheel_metadata(source_dir=".")["Version"]))
         else:
           sys.exit(1)
     - id: build

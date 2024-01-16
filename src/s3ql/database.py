@@ -18,6 +18,7 @@ import collections
 import copy
 import dataclasses
 import logging
+import math
 import os
 import re
 import time
@@ -26,7 +27,7 @@ from typing import Dict, List, Optional
 import apsw
 
 from . import CURRENT_FS_REV, sqlite3ext
-from .backends.common import AbstractBackend
+from .backends.common import AbstractBackend, NoSuchObject
 from .common import freeze_basic_mapping, sha256_fh, thaw_basic_mapping
 from .logging import QuietError
 
@@ -82,11 +83,26 @@ class FsAttributes:
         return copy.copy(self)
 
     @staticmethod
-    def deserialize(buf: bytes):
+    def deserialize(buf: bytes, min_seq: Optional[int] = None):
+        '''De-serialize *buf* into a `FsAttributes` instance.
+
+        If *min_seq* is specified and the buffer has a sequence number lower than
+        that, raise `OutdatedData` exception. When possible, this is raised before doing
+        filesystem revision checks.
+        '''
         d = thaw_basic_mapping(buf)
+
+        # seq_no is present in all fs revisions, so this check is safe.
+        if min_seq is not None and d['seq_no'] < min_seq:
+            raise OutdatedData()
+
         if d['revision'] < CURRENT_FS_REV:
             raise QuietError(
                 'File system revision too old, please run `s3qladm upgrade` first.', exitcode=32
+            )
+        elif d['revision'] > CURRENT_FS_REV:
+            raise QuietError(
+                'File system revision too new, please update your S3QL installation.', exitcode=33
             )
         return FsAttributes(**d)
 
@@ -94,13 +110,11 @@ class FsAttributes:
         return freeze_basic_mapping(dataclasses.asdict(self))
 
 
-# convert unsigned time_ns (64-bit int) to signed (for db insert/update)
-def u2s_ns(us_time_ns):
-    return us_time_ns-(2**63)
+class OutdatedData(RuntimeError):
+    '''Raised by `FsAttributes.deserialize`'''
 
-# convert signed time_ns to unsigned (for db read)
-def s2u_ns(s_time_ns):
-    return s_time_ns+(2**63)
+    pass
+
 
 class Connection:
     '''
@@ -122,7 +136,11 @@ class Connection:
     def __init__(self, file_: str, blocksize: Optional[int] = None):
         if blocksize:
             sqlite3ext.set_blocksize(blocksize)
-            file_ = os.path.abspath(file_)
+
+            # Need to make sure that SQLite and the write tracker module agree on the canonical path
+            # of the file (otherwise write tracking will not be enabled).
+            file_ = os.path.realpath(file_)
+
             self.dirty_blocks = sqlite3ext.track_writes(file_)
             self.conn = apsw.Connection(file_, vfs=sqlite3ext.get_vfsname())
         else:
@@ -450,7 +468,7 @@ def get_block_objects(backend: AbstractBackend) -> Dict[int, List[int]]:
     '''Get list of objects holding versions of each block'''
 
     block_list = collections.defaultdict(list)
-    log.info('Scanning metadata objects...')
+    log.debug('Scanning metadata objects...')
     for obj in backend.list('s3ql_metadata_'):
         hit = METADATA_OBJ_RE.match(obj)
         if not hit:
@@ -468,7 +486,12 @@ def get_block_objects(backend: AbstractBackend) -> Dict[int, List[int]]:
     return block_list
 
 
-def download_metadata(backend: AbstractBackend, db_file: str, params: FsAttributes, failsafe=False):
+def download_metadata(
+    backend: AbstractBackend,
+    db_file: str,
+    params: FsAttributes,
+    failsafe=False,
+):
     '''Download metadata from backend into *db_file*
 
     If *failsafe* is True, do not truncate file and do not verify
@@ -483,14 +506,20 @@ def download_metadata(backend: AbstractBackend, db_file: str, params: FsAttribut
     total = len(block_list)
     processed = 0
 
-    log.info('Downloading metadata...')
     with open(db_file, 'w+b', buffering=0) as fh:
-        for (blockno, candidates) in block_list.items():
+        for blockno, candidates in block_list.items():
             off = blockno * blocksize
-            if off > file_size and not failsafe:
+            if off >= file_size and not failsafe:
                 log.debug('download_metadata: skipping obsolete block %d', blockno)
                 continue
-            seq_no = first_le_than(candidates, params.seq_no)
+            try:
+                seq_no = first_le_than(candidates, params.seq_no)
+            except ValueError:
+                # In filesafe mode we do not have accurate file size information, so
+                # the file may be shorter than this offset.
+                if not failsafe:
+                    raise
+
             processed += 1
             log.info(
                 'Downloaded %d/%d metadata blocks (%d%%)',
@@ -501,13 +530,13 @@ def download_metadata(backend: AbstractBackend, db_file: str, params: FsAttribut
             )
             obj = METADATA_OBJ_NAME % (blockno, seq_no)
             fh.seek(off)
-            backend.readinto(obj, fh)
+            backend.readinto_fh(obj, fh)
 
         if not failsafe:
             log.debug('download_metadata: truncating file to %d bytes', file_size)
             fh.truncate(file_size)
 
-            log.info('Calculating metadata checksum...')
+            log.debug('Calculating metadata checksum...')
             digest = sha256_fh(fh).hexdigest()
             log.debug('download_metadata: digest is %s', digest)
             if params.db_md5 != digest:
@@ -526,6 +555,8 @@ def first_le_than(l: List[int], threshold: int):
         if e <= threshold:
             return e
 
+    raise ValueError('No element below %d in list of length %d' % (threshold, len(l)))
+
 
 def get_available_seq_nos(backend: AbstractBackend) -> List[int]:
     nos = []
@@ -542,6 +573,7 @@ def get_available_seq_nos(backend: AbstractBackend) -> List[int]:
 def expire_objects(backend, versions_to_keep=32):
     '''Delete metadata objects that are no longer needed'''
 
+    log.debug('Expiring old metadata backups...')
     block_list = get_block_objects(backend)
     to_remove = []
 
@@ -553,18 +585,23 @@ def expire_objects(backend, versions_to_keep=32):
     # Determine which objects we still need
     to_keep = collections.defaultdict(set)
     for seq_no in seq_to_keep:
-        params = FsAttributes.deserialize(backend['s3ql_params_%010x' % seq_no])
-        assert params.seq_no == seq_no
+        # We'll have to figure out what we want to do here when one of the objects
+        # has an older filesystem revision...
+        params = read_remote_params(backend, seq_no)
         blocksize = params.metadata_block_size
-        max_blockno = (params.db_size + blocksize - 1) // blocksize
 
-        for (blockno, candidates) in block_list.items():
-            if blockno >= max_blockno:
+        # math.ceil() calculates the number of blocks we need. To convert to
+        # the index, need to subtract one (with one blocks, the max index is 0).
+        max_blockno = math.ceil(params.db_size / blocksize) - 1
+
+        for blockno, candidates in block_list.items():
+            log.debug('block %d has candidates %s', blockno, candidates)
+            if blockno > max_blockno:
                 continue
             to_keep[blockno].add(first_le_than(candidates, seq_no))
 
     # Remove what's no longer needed
-    for (blockno, candidates) in block_list.items():
+    for blockno, candidates in block_list.items():
         for seq_no in candidates:
             if seq_no in to_keep[blockno]:
                 continue
@@ -595,7 +632,7 @@ def upload_metadata(
             next_dirty_block = db.dirty_blocks.get_block
             total = db.dirty_blocks.get_count()
         else:
-            total = (db_size + blocksize - 1) // blocksize
+            total = math.ceil(db_size / blocksize)
             all_blocks = iter(range(0, total))
 
             def next_dirty_block():
@@ -611,17 +648,18 @@ def upload_metadata(
             except KeyError:
                 break
 
+            log.debug('Uploading block %d', blockno)
             processed += 1
             log.info(
                 'Uploaded %d out of ~%d dirty blocks (%d%%)',
                 processed,
                 total,
                 processed * 100 / total,
-                extra={'rate_limit': 1, 'update_console': True},
+                extra={'rate_limit': 1, 'update_console': True, 'is_last': processed == total},
             )
             obj = METADATA_OBJ_NAME % (blockno, params.seq_no)
             fh.seek(blockno * blocksize)
-            backend.store(obj, fh.read(blocksize))
+            backend.write_fh(obj, fh, len_=blocksize)
 
         if not update_params:
             return
@@ -662,46 +700,38 @@ def write_params(cachepath: str, params: FsAttributes):
         os.close(dirfd)
 
 
-def read_cached_params(cachepath: str) -> Optional[FsAttributes]:
+def read_cached_params(cachepath: str, min_seq: Optional[int] = None) -> Optional[FsAttributes]:
     filename = cachepath + '.params'
-    if os.path.exists(filename):
-        with open(filename, 'rb') as fh:
-            params = FsAttributes.deserialize(fh.read())
-    else:
+    if not os.path.exists(filename):
         return None
 
-    if params.revision < CURRENT_FS_REV:
-        raise QuietError(
-            'File system revision too old, please run `s3qladm upgrade` first.', exitcode=32
-        )
-    elif params.revision > CURRENT_FS_REV:
-        raise QuietError(
-            'File system revision too new, please update your S3QL installation.', exitcode=33
-        )
+    assert os.path.exists(cachepath + '.db')
+    with open(filename, 'rb') as fh:
+        buf = fh.read()
+
+    try:
+        params = FsAttributes.deserialize(buf, min_seq=min_seq)
+    except OutdatedData:
+        log.info('Ignoring locally cached metadata (outdated).')
+        return None
 
     return params
 
 
 def read_remote_params(backend, seq_no: Optional[int] = None) -> FsAttributes:
-    if not backend.contains('s3ql_params'):
-        raise QuietError(
-            'File system revision too old, please run `s3qladm upgrade` first.', exitcode=32
-        )
-
     if seq_no is None:
-        buf = backend['s3ql_params']
+        try:
+            buf = backend['s3ql_params']
+        except NoSuchObject:
+            raise QuietError(
+                'File system revision too old, please run `s3qladm upgrade` first.', exitcode=32
+            )
     else:
         buf = backend['s3ql_params_%010x' % seq_no]
     params = FsAttributes.deserialize(buf)
 
-    if params.revision < CURRENT_FS_REV:
-        raise QuietError(
-            'File system revision too old, please run `s3qladm upgrade` first.', exitcode=32
-        )
-    elif params.revision > CURRENT_FS_REV:
-        raise QuietError(
-            'File system revision too new, please update your S3QL installation.', exitcode=33
-        )
+    if seq_no:
+        assert params.seq_no == seq_no
 
     return params
 

@@ -16,9 +16,12 @@ assert logging.LOG_ONCE  # prevent warnings about unused module
 
 from pyfuse3 import ROOT_INODE
 
-VERSION = '5.0.1'
+VERSION = '5.1.3'
 RELEASE = '%s' % VERSION
-CURRENT_FS_REV = 27
+
+# When bumping this up, figure out how database.py's expire_objects() should deal with older
+# filesystem revisions.
+CURRENT_FS_REV = 26
 
 # Buffer size when writing objects
 BUFSIZE = 256 * 1024
@@ -30,7 +33,6 @@ CTRL_INODE = ROOT_INODE + 1
 # Maps file system revisions to the last S3QL version that
 # supported this revision.
 REV_VER_MAP = {
-    26: '5.0.0',
     25: '4.0.0',
     24: '3.8.1',
     23: '2.26',

@@ -6,16 +6,17 @@ Copyright © 2008 Nikolaus Rath <Nikolaus@rath.org>
 This work can be distributed under the terms of the GNU GPLv3.
 '''
 
+import hashlib
 import json
 import logging
 import os
 import re
-import shutil
 import ssl
 import urllib.parse
+from typing import Any, BinaryIO, Dict, Optional
 from urllib.parse import urlsplit
 
-from dugong import (
+from s3ql.http import (
     BodyFollowing,
     CaseInsensitiveDict,
     ConnectionClosed,
@@ -24,7 +25,8 @@ from dugong import (
 )
 from packaging.version import Version
 
-from .. import BUFSIZE
+from s3ql.common import copyfh
+
 from ..logging import LOG_ONCE, QuietError
 from . import s3c
 from .common import (
@@ -36,7 +38,7 @@ from .common import (
     get_ssl_context,
     retry,
 )
-from .s3c import BadDigestError, HTTPError, ObjectR, ObjectW, md5sum_b64
+from .s3c import BadDigestError, HTTPError, md5sum_b64
 
 log = logging.getLogger(__name__)
 
@@ -45,11 +47,7 @@ TEMP_SUFFIX = '_tmp$oentuhuo23986konteuh1062$'
 
 
 class Backend(AbstractBackend):
-    """A backend to store data in OpenStack Swift
-
-    The backend guarantees get after create consistency, i.e. a newly created
-    object will be immediately retrievable.
-    """
+    """A backend to store data in OpenStack Swift"""
 
     hdr_prefix = 'X-Object-'
     known_options = {
@@ -224,7 +222,16 @@ class Backend(AbstractBackend):
 
             raise RuntimeError('No valid authentication path found')
 
-    def _do_request(self, method, path, subres=None, query_string=None, headers=None, body=None):
+    def _do_request(
+        self,
+        method,
+        path,
+        subres=None,
+        query_string=None,
+        headers=None,
+        body=None,
+        body_len: Optional[int] = None,
+    ):
         '''Send request, read and return response object
 
         This method modifies the *headers* dictionary.
@@ -257,7 +264,9 @@ class Backend(AbstractBackend):
 
         headers['X-Auth-Token'] = self.auth_token
         try:
-            resp = self._do_request_inner(method, path, body=body, headers=headers)
+            resp = self._do_request_inner(
+                method, path, body=body, headers=headers, body_len=body_len
+            )
         except Exception as exc:
             if is_temp_network_error(exc) or isinstance(exc, ssl.SSLError):
                 # We probably can't use the connection anymore
@@ -283,7 +292,7 @@ class Backend(AbstractBackend):
 
     # Including this code directly in _do_request would be very messy since
     # we can't `return` the response early, thus the separate method
-    def _do_request_inner(self, method, path, body, headers):
+    def _do_request_inner(self, method, path, body, headers, body_len: Optional[int] = None):
         '''The guts of the _do_request method'''
 
         log.debug('started with %s %s', method, path)
@@ -293,7 +302,6 @@ class Backend(AbstractBackend):
             self.conn.send_request(method, path, body=body, headers=headers)
             return self.conn.read_response()
 
-        body_len = os.fstat(body.fileno()).st_size
         self.conn.send_request(
             method, path, expect100=use_expect_100c, headers=headers, body=BodyFollowing(body_len)
         )
@@ -305,8 +313,9 @@ class Backend(AbstractBackend):
                 return resp
 
         log.debug('writing body data')
+        md5 = hashlib.md5()
         try:
-            shutil.copyfileobj(body, self.conn, BUFSIZE)
+            copyfh(body, self.conn, len_=body_len, update=md5.update)
         except ConnectionClosed:
             log.debug('interrupted write, server closed connection')
             # Server closed connection while we were writing body data -
@@ -328,7 +337,21 @@ class Backend(AbstractBackend):
             # Re-raise original error
             raise
 
-        return self.conn.read_response()
+        resp = self.conn.read_response()
+
+        # On success, check MD5. Not sure if this is returned every time we send a request body, but
+        # it seems to work. If not, we have to somehow pass in the information when this is expected
+        # (i.e, when storing an object)
+        if resp.status >= 200 and resp.status <= 299:
+            etag = resp.headers['ETag'].strip('"')
+
+            if etag != md5.hexdigest():
+                raise BadDigestError(
+                    'BadDigest',
+                    f'MD5 mismatch when sending {method} {path} (received: {etag}, sent: {md5.hexdigest()})',
+                )
+
+        return resp
 
     @retry
     def lookup(self, key):
@@ -367,8 +390,17 @@ class Backend(AbstractBackend):
         except KeyError:
             raise RuntimeError('HEAD request did not return Content-Length')
 
+    def readinto_fh(self, key: str, fh: BinaryIO):
+        '''Transfer data stored under *key* into *fh*, return metadata.
+
+        The data will be inserted at the current offset. If a temporary error (as defined by
+        `is_temp_failure`) occurs, the operation is retried.
+        '''
+
+        return self._readinto_fh(key, fh, fh.tell())
+
     @retry
-    def open_read(self, key):
+    def _readinto_fh(self, key: str, fh: BinaryIO, off: int):
         if key.endswith(TEMP_SUFFIX):
             raise ValueError('Keys must not end with %s' % TEMP_SUFFIX)
         try:
@@ -377,6 +409,7 @@ class Backend(AbstractBackend):
             if exc.status == 404:
                 raise NoSuchObject(key)
             raise
+        etag = resp.headers['ETag'].strip('"')
 
         try:
             meta = self._extractmeta(resp, key)
@@ -389,27 +422,66 @@ class Backend(AbstractBackend):
                 self.conn.disconnect()
             raise
 
-        return ObjectR(key, resp, self, meta)
+        md5 = hashlib.md5()
+        fh.seek(off)
+        copyfh(self.conn, fh, update=md5.update)
 
-    def open_write(self, key, metadata=None, is_compressed=False):
-        """
-        The returned object will buffer all data and only start the upload
-        when its `close` method is called.
-        """
-        log.debug('started with %s', key)
+        if etag != md5.hexdigest():
+            log.warning('MD5 mismatch for %s: %s vs %s', key, etag, md5.hexdigest())
+            raise BadDigestError('BadDigest', 'ETag header does not agree with calculated MD5')
+
+        return meta
+
+    def write_fh(
+        self,
+        key: str,
+        fh: BinaryIO,
+        metadata: Optional[Dict[str, Any]] = None,
+        len_: Optional[int] = None,
+    ):
+        '''Upload *len_* bytes from *fh* under *key*.
+
+        The data will be read at the current offset. If *len_* is None, reads until the
+        end of the file.
+
+        If a temporary error (as defined by `is_temp_failure`) occurs, the operation is
+        retried. Returns the size of the resulting storage object.
+        '''
 
         if key.endswith(TEMP_SUFFIX):
             raise ValueError('Keys must not end with %s' % TEMP_SUFFIX)
 
-        headers = CaseInsensitiveDict()
-        if metadata is None:
-            metadata = dict()
-        self._add_meta_headers(headers, metadata, chunksize=self.features.max_meta_len)
-
-        return ObjectW(key, self, headers)
+        off = fh.tell()
+        if len_ is None:
+            fh.seek(0, os.SEEK_END)
+            len_ = fh.tell()
+        return self._write_fh(key, fh, off, len_, metadata or {})
 
     @retry
-    def delete(self, key, force=False, is_retry=False):
+    def _write_fh(self, key: str, fh: BinaryIO, off: int, len_: int, metadata: Dict[str, Any]):
+        headers = CaseInsensitiveDict()
+        self._add_meta_headers(headers, metadata, chunksize=self.features.max_meta_len)
+
+        headers['Content-Type'] = 'application/octet-stream'
+        fh.seek(off)
+        try:
+            resp = self._do_request(
+                'PUT',
+                '/%s%s' % (self.prefix, key),
+                headers=headers,
+                body=fh,
+                body_len=len_,
+            )
+        except BadDigestError:
+            # Object was corrupted in transit, make sure to delete it
+            self.delete(key)
+            raise
+
+        self._assert_empty_response(resp)
+        return len_
+
+    @retry
+    def delete(self, key):
         if key.endswith(TEMP_SUFFIX):
             raise ValueError('Keys must not end with %s' % TEMP_SUFFIX)
         log.debug('started with %s', key)
@@ -417,15 +489,13 @@ class Backend(AbstractBackend):
             resp = self._do_request('DELETE', '/%s%s' % (self.prefix, key))
             self._assert_empty_response(resp)
         except HTTPError as exc:
-            # Server may have deleted the object even though we did not
-            # receive the response.
-            if exc.status == 404 and not (force or is_retry):
-                raise NoSuchObject(key)
-            elif exc.status != 404:
+            if exc.status == 404:
+                pass
+            else:
                 raise
 
     @retry
-    def _delete_multi(self, keys, force=False):
+    def _delete_multi(self, keys):
         """Doing bulk delete of multiple objects at a time.
 
         This is a feature of the configurable middleware "Bulk" so it can only
@@ -513,11 +583,11 @@ class Backend(AbstractBackend):
             raise RuntimeError('Unexpected server reply')
 
         if resp_status_code == 200:
-            # No errors occured, everything has been deleted
+            # No errors occurred, everything has been deleted
             del keys[:]
             return
 
-        # Some errors occured, so we need to determine what has
+        # Some errors occurred, so we need to determine what has
         # been deleted and what hasn't
         failed_keys = []
         offset = len(esc_prefix)
@@ -583,18 +653,18 @@ class Backend(AbstractBackend):
     def has_delete_multi(self):
         return self.features.has_bulk_delete
 
-    def delete_multi(self, keys, force=False):
+    def delete_multi(self, keys):
         log.debug('started with %s', keys)
 
         if self.features.has_bulk_delete:
             while len(keys) > 0:
                 tmp = keys[: self.features.max_deletes]
                 try:
-                    self._delete_multi(tmp, force=force)
+                    self._delete_multi(tmp)
                 finally:
                     keys[: self.features.max_deletes] = tmp
         else:
-            super().delete_multi(keys, force=force)
+            super().delete_multi(keys)
 
     def list(self, prefix=''):
         prefix = self.prefix + prefix
@@ -609,7 +679,6 @@ class Backend(AbstractBackend):
 
     @retry
     def _list_page(self, prefix, page_token=None, batch_size=1000):
-
         # Limit maximum number of results since we read everything
         # into memory (because Python JSON doesn't have a streaming API)
         query_string = {'prefix': prefix, 'limit': str(batch_size), 'format': 'json'}

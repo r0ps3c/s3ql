@@ -8,7 +8,7 @@
     "python.formatting.blackArgs": [
         "--line-length=100",
         "--skip-string-normalization",
-        "--required-version=22.3.0",
+        "--required-version=23.3.0"
     ],
     "editor.formatOnSave": true,
     "C_Cpp.vcFormat.newLine.beforeOpenBrace.block": "sameLine",
@@ -37,10 +37,13 @@
     "[python]": {
         "editor.codeActionsOnSave": {
             "source.organizeImports": true
-        }
+        },
+        "editor.defaultFormatter": "ms-python.black-formatter"
     },
     "isort.check": true,
     "python.analysis.exclude": [
         "s3ql.old/"
-    ]
+    ],
+    "python.linting.mypyEnabled": false,
+    "black-formatter.importStrategy": "useBundled"
 }

@@ -31,7 +31,7 @@ from s3ql.database import (
     write_params,
 )
 
-from . import BUFSIZE, CURRENT_FS_REV, REV_VER_MAP
+from . import CURRENT_FS_REV, REV_VER_MAP
 from .backends.comprenc import ComprencBackend
 from .common import AsyncFn, get_backend, handle_on_return, is_mounted, thaw_basic_mapping
 from .logging import QuietError, setup_logging, setup_warnings
@@ -203,7 +203,7 @@ def clear(options, on_return):
     print(
         'I am about to DELETE ALL DATA in %s.' % backend,
         'This includes not just S3QL file systems but *all* stored objects.',
-        'Depending on the storage service, it may be neccessary to run this command',
+        'Depending on the storage service, it may be necessary to run this command',
         'several times to delete all data, and it may take a while until the ',
         'removal becomes effective.',
         'Please enter "yes" to continue.',
@@ -245,7 +245,7 @@ def clear(options, on_return):
         t.start()
         threads.append(t)
 
-    for (i, obj_id) in enumerate(backend.list()):
+    for i, obj_id in enumerate(backend.list()):
         log.info(
             'Deleting objects (%d so far)...', i, extra={'rate_limit': 1, 'update_console': True}
         )
@@ -327,7 +327,7 @@ def upgrade(backend, options):
             File system revision too old to upgrade!
 
             You need to use an older S3QL version to upgrade to a more recent revision before you
-            can use this version to upgrade to the newest revsion.
+            can use this version to upgrade to the newest revision.
             '''
             )
         )
@@ -388,27 +388,11 @@ def upgrade(backend, options):
     # re-mount the filesystem with an older S3QL version.
     log.info('Backing up old metadata...')
     local_params['revision'] = CURRENT_FS_REV
+    local_params['seq_no'] += 1
     with tempfile.TemporaryFile() as tmpfh:
-
-        def do_read(fh):
-            tmpfh.seek(0)
-            while True:
-                buf = fh.read(BUFSIZE)
-                if not buf:
-                    break
-                tmpfh.write(buf)
-
-        backend.perform_read(do_read, 's3ql_metadata')
-
-        def do_write(fh):
-            tmpfh.seek(0)
-            while True:
-                buf = tmpfh.read(BUFSIZE)
-                if not buf:
-                    break
-                fh.write(buf)
-
-        backend.perform_write(do_write, "s3ql_metadata", metadata=local_params, is_compressed=True)
+        backend.readinto_fh('s3ql_metadata', tmpfh)
+        tmpfh.seek(0)
+        backend.write_fh("s3ql_metadata", tmpfh, metadata=local_params, dont_compress=True)
 
     print('File system upgrade complete.')
 
@@ -421,8 +405,14 @@ def restore_metadata_cmd(backend, options):
 
     print('The following backups are available:')
     print('Idx    Seq No: Last Modified:')
-    for (i, seq_no) in enumerate(backups):
-        params = FsAttributes.deserialize(backend['s3ql_params_%010x' % seq_no])
+    for i, seq_no in enumerate(backups):
+        # De-serialize directly instead of using read_remote_params() to avoid exceptions on old
+        # filesystem revisions.
+        d = thaw_basic_mapping(backend['s3ql_params_%010x' % seq_no])
+        if d['revision'] != CURRENT_FS_REV:
+            print(f'{i:3d} {seq_no:010x} (unsupported revision)')
+            continue
+        params = FsAttributes(**d)
         assert params.seq_no == seq_no
         date = datetime.fromtimestamp(params.last_modified).strftime('%Y-%m-%d %H:%M:%S')
         print(f'{i:3d} {seq_no:010x} {date}')
@@ -442,6 +432,7 @@ def restore_metadata_cmd(backend, options):
             print('Invalid selection.')
 
     params = read_remote_params(backend, seq_no=seq_no)
+    log.info('Downloading metadata...')
     conn = download_metadata(backend, options.cachepath + ".db", params)
     conn.close()
 
@@ -454,7 +445,7 @@ def restore_metadata_cmd(backend, options):
 
     print(
         'Backup restored into local metadata. Run fsck.s3ql to commit changes to',
-        'backend and ensure file system consisteny',
+        'backend and ensure file system consistency',
         sep='\n',
     )
 

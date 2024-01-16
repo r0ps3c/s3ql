@@ -11,10 +11,11 @@ include LICENSE
 include src/s3ql/sqlite3ext.pyx
 exclude WARNING
 exclude MANIFEST.in
+exclude signify/*.sec
+include signify/*.pub
 prune tests/.cache
 prune tests/.pytest_cache
 prune doc/doctrees
-prune src/dugong
 prune doc/man/.doctrees
 prune doc/html/.doctrees
 global-exclude *.pyc

@@ -12,7 +12,7 @@ import re
 import urllib.parse
 from urllib.parse import urlsplit
 
-from dugong import CaseInsensitiveDict, HTTPConnection
+from s3ql.http import CaseInsensitiveDict, HTTPConnection
 
 from ..logging import QuietError
 from . import swift
@@ -23,7 +23,6 @@ log = logging.getLogger(__name__)
 
 
 class Backend(swift.Backend):
-
     # Add the options for the v3 keystore swift.
     known_options = swift.Backend.known_options | {
         'domain',
@@ -39,7 +38,6 @@ class Backend(swift.Backend):
         super().__init__(options)
 
     def _parse_storage_url(self, storage_url, ssl_context):
-
         hit = re.match(
             r'^[a-zA-Z0-9]+://'  # Backend
             r'([^/:]+)'  # Hostname

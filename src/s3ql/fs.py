@@ -212,7 +212,7 @@ class Operations(pyfuse3.Operations):
             'WHERE parent_inode=? AND name_id > ? ORDER BY name_id',
             (id_, off - 3),
         ) as res:
-            for (next_, name, cid_) in res:
+            for next_, name, cid_ in res:
                 if not pyfuse3.readdir_reply(
                     token, name, self.inodes[cid_].entry_attributes(), next_ + 3
                 ):
@@ -373,7 +373,7 @@ class Operations(pyfuse3.Operations):
                     'AND name_id > ? ORDER BY name_id',
                     (id_p, off),
                 ) as res:
-                    for (name_id, id_) in res:
+                    for name_id, id_ in res:
                         self.inodes[id_].locked = True
 
                         if conn.has_val('SELECT 1 FROM contents WHERE parent_inode=?', (id_,)):
@@ -428,7 +428,7 @@ class Operations(pyfuse3.Operations):
                 )
                 reinserted = False
 
-                for (name, _, id_) in query_chunk:
+                for name, _, id_ in query_chunk:
                     if conn.has_val('SELECT 1 FROM contents WHERE parent_inode=?', (id_,)):
                         # First delete subdirectories
                         if not reinserted:
@@ -437,11 +437,14 @@ class Operations(pyfuse3.Operations):
                         queue.append(id_)
                     else:
                         if is_open:
-                            pyfuse3.invalidate_entry_async(id_p, name)
+                            # This may fail with ENOTEMPTY in rare circumstances. See below for details.
+                            pyfuse3.invalidate_entry_async(
+                                id_p, name, deleted=id_, ignore_enoent=True
+                            )
                         await self._remove(id_p, name, id_, force=True)
                     processed += 1
 
-                if query_chunk and not reinserted:
+                if len(query_chunk) == batch_mgr.batch_size and not reinserted:
                     # Make sure to re-insert the directory to process the remaining
                     # contents and delete the directory itself.
                     queue.append(id_p)
@@ -454,7 +457,14 @@ class Operations(pyfuse3.Operations):
 
         if id_p0 in self.open_inodes:
             log.debug('invalidate_entry(%d, %r)', id_p0, name0)
-            pyfuse3.invalidate_entry_async(id_p0, name0)
+            # This may fail with ENOTEMPTY if the control file has been looked up underneath this
+            # path (same for the invalidate_entry_call_async above). In normal operation this should
+            # be rare, since the control file is not included in readdir() output and only S3QL
+            # tools know about its existence. We could preemtively run invalidate_entry_async() for
+            # the control file whenever we run it for a directory, but that would still leave a
+            # window in which the file could be looked up again and would also impose a performance
+            # penalty for something that is exceedingly rare. Tracked in https://github.com/s3ql/s3ql/issues/319.
+            pyfuse3.invalidate_entry_async(id_p0, name0, deleted=id0, ignore_enoent=True)
         await self._remove(id_p0, name0, id0, force=True)
 
         await self.forget([(id0, 1)])
@@ -507,8 +517,7 @@ class Operations(pyfuse3.Operations):
                     'AND name_id > ? ORDER BY name_id',
                     (src_id, off),
                 ) as res:
-                    for (name_id, id_) in res:
-
+                    for name_id, id_ in res:
                         # Make sure that all blocks are in the database
                         if id_ in self.open_inodes:
                             await self.cache.start_flush(id_)
@@ -796,7 +805,6 @@ class Operations(pyfuse3.Operations):
         inode_p_new.ctime_ns = now_ns
 
     def _replace(self, id_p_old, name_old, id_p_new, name_new, id_old, id_new):
-
         now_ns = time_ns()
 
         if self.db.has_val("SELECT 1 FROM contents WHERE parent_inode=?", (id_new,)):
@@ -898,9 +906,13 @@ class Operations(pyfuse3.Operations):
             inode.gid = attr.st_gid
 
         if fields.update_atime:
+            if attr.st_atime_ns.bit_length() > 63:
+                raise FUSEError(errno.EINVAL)
             inode.atime_ns = attr.st_atime_ns
 
         if fields.update_mtime:
+            if attr.st_mtime_ns.bit_length() > 63:
+                raise FUSEError(errno.EINVAL)
             inode.mtime_ns = attr.st_mtime_ns
 
         inode.ctime_ns = now_ns
@@ -1215,6 +1227,7 @@ class Operations(pyfuse3.Operations):
             length = len(buf)
         elif buf is None:
             write = False
+            max_write = None
         else:
             raise TypeError("Don't know what to do!")
 
@@ -1222,8 +1235,14 @@ class Operations(pyfuse3.Operations):
         if offset_rel + length > self.max_obj_size:
             length = self.max_obj_size - offset_rel
 
+        if write:
+            # Point to the last byte that we will write
+            max_write = offset_rel + length - 1
+        else:
+            max_write = None
+
         try:
-            async with self.cache.get(id_, blockno) as fh:
+            async with self.cache.get(id_, blockno, max_write=max_write) as fh:
                 fh.seek(offset_rel)
                 if write:
                     fh.write(buf[:length])
@@ -1263,7 +1282,7 @@ class Operations(pyfuse3.Operations):
     async def forget(self, forget_list):
         log.debug('started with %s', forget_list)
 
-        for (id_, nlookup) in forget_list:
+        for id_, nlookup in forget_list:
             self.open_inodes[id_] -= nlookup
 
             if self.open_inodes[id_] == 0:

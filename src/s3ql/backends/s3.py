@@ -16,7 +16,7 @@ from xml.sax.saxutils import escape as xml_escape
 
 from ..logging import QuietError
 from . import s3c
-from .common import NoSuchObject, retry
+from .common import retry
 from .s3c import get_S3Error
 
 log = logging.getLogger(__name__)
@@ -32,10 +32,6 @@ class Backend(s3c.Backend):
     """A backend to store data in Amazon S3
 
     This class uses standard HTTP connections to connect to S3.
-
-    The backend guarantees get after create consistency, i.e. a newly created
-    object will be immediately retrievable. Additional consistency guarantees
-    may or may not be available and can be queried for with instance methods.
     """
 
     known_options = (s3c.Backend.known_options | {'sse', 'rrs', 'ia', 'oia', 'it'}) - {
@@ -47,6 +43,7 @@ class Backend(s3c.Backend):
         self.region = None
         self.signing_key = None
         super().__init__(options)
+        self._set_storage_options(self._extra_put_headers)
 
     def _parse_storage_url(self, storage_url, ssl_context):
         hit = re.match(r'^s3s?://([^/]+)/([^/]+)(?:/(.*))?$', storage_url)
@@ -76,13 +73,13 @@ class Backend(s3c.Backend):
     def has_delete_multi(self):
         return True
 
-    def delete_multi(self, keys, force=False):
+    def delete_multi(self, keys):
         log.debug('started with %s', keys)
 
         while len(keys) > 0:
             tmp = keys[:MAX_KEYS]
             try:
-                self._delete_multi(tmp, force=force)
+                self._delete_multi(tmp)
             finally:
                 keys[:MAX_KEYS] = tmp
 
@@ -102,16 +99,8 @@ class Backend(s3c.Backend):
             sc = 'STANDARD'
         headers['x-amz-storage-class'] = sc
 
-    def open_write(self, key, metadata=None, is_compressed=False):
-        extra_headers = {}
-        self._set_storage_options(extra_headers)
-        return super().open_write(
-            key, metadata=metadata, is_compressed=is_compressed, extra_headers=extra_headers
-        )
-
     @retry
-    def _delete_multi(self, keys, force=False):
-
+    def _delete_multi(self, keys):
         body = ['<Delete>']
         esc_prefix = xml_escape(self.prefix)
         for key in keys:
@@ -127,11 +116,11 @@ class Backend(s3c.Backend):
 
             error_tags = root.findall(ns_p + 'Error')
             if not error_tags:
-                # No errors occured, everything has been deleted
+                # No errors occurred, everything has been deleted
                 del keys[:]
                 return
 
-            # Some errors occured, so we need to determine what has
+            # Some errors occurred, so we need to determine what has
             # been deleted and what hasn't
             offset = len(self.prefix)
             for tag in root.findall(ns_p + 'Deleted'):
@@ -152,8 +141,7 @@ class Backend(s3c.Backend):
             errkey = error_tags[0].findtext(ns_p + 'Key')[offset:]
 
             if errcode == 'NoSuchKeyError':
-                if not force:
-                    raise NoSuchObject(errkey)
+                pass
             else:
                 raise get_S3Error(errcode, 'Error deleting %s: %s' % (errkey, errmsg))
 

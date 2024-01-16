@@ -16,6 +16,8 @@ if __name__ == "__main__":
 
 
 import logging
+import math
+import os
 import tempfile
 from argparse import Namespace
 from typing import List
@@ -62,6 +64,46 @@ def test_track_dirty():
         db.execute("UPDATE FOO SET data=? WHERE id=?", (random_data(len(DUMMY_DATA)), 0))
         db.checkpoint()
         assert rows > db.dirty_blocks.get_count() > 0
+
+        db.close()
+
+
+def test_track_dirty_symlink():
+    rows = 11
+    sqlite3ext.reset()
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.mkdir(os.path.join(tmpdir, 'target'))
+        os.symlink('target', os.path.join(tmpdir, 'link'))
+        fname = os.path.join(tmpdir, 'link', 'testdb')
+
+        db = Connection(fname, BLOCKSIZE)
+        db.execute("CREATE TABLE foo (id INT, data BLOB);")
+        for i in range(rows):
+            db.execute("INSERT INTO FOO VALUES(?, ?)", (i, DUMMY_DATA))
+
+        db.checkpoint()
+        assert db.dirty_blocks.get_count() >= rows
+
+        db.dirty_blocks.clear()
+        assert db.dirty_blocks.get_count() == 0
+
+        db.execute("UPDATE FOO SET data=? WHERE id=?", (random_data(len(DUMMY_DATA)), 0))
+        db.checkpoint()
+        assert rows > db.dirty_blocks.get_count() > 0
+
+        db.close()
+
+
+def test_track_dirty_count():
+    sqlite3ext.reset()
+    with tempfile.NamedTemporaryFile() as tmpfh:
+        db = Connection(tmpfh.name, BLOCKSIZE)
+        db.execute("CREATE TABLE foo (id INT);")
+        db.execute("INSERT INTO FOO VALUES(42)")
+
+        db.checkpoint()
+        db_size = tmpfh.seek(0, os.SEEK_END)
+        assert db.dirty_blocks.get_count() == math.ceil(db_size / BLOCKSIZE)
 
         db.close()
 
@@ -179,7 +221,7 @@ def test_versioning(backend):
 
         db.close()
 
-    for (params, ref_db) in versions:
+    for params, ref_db in versions:
         with tempfile.NamedTemporaryFile() as tmpfh2:
             download_metadata(backend, tmpfh2.name, params)
             assert tmpfh2.read() == ref_db
@@ -197,12 +239,11 @@ def _test_expiration(
     db_sizes: List[int],
     versions_to_keep: int,
 ):
-
     id_seq_map = {}
     for blockno, versions in enumerate(contents_pre):
         assert len(db_sizes) == len(versions)
         last_id = None
-        for (seq_no, block_id) in enumerate(versions):
+        for seq_no, block_id in enumerate(versions):
             if last_id != block_id:
                 last_id = block_id
                 if block_id is None:
@@ -343,3 +384,34 @@ def test_expiration_downup(backend):
         [None, 40, None],  # block 3
     ]
     _test_expiration(backend, contents_pre, contents_post, db_sizes=db_sizes, versions_to_keep=3)
+
+
+@pytest.mark.parametrize("incremental", (True, False))
+def test_download_shorter(backend, incremental):
+    # Test downloading older snapshot when the filesize has grown
+    sqlite3ext.reset()
+    params = FsAttributes(
+        metadata_block_size=BLOCKSIZE,
+        data_block_size=BLOCKSIZE,
+        seq_no=1,
+    )
+    with tempfile.NamedTemporaryFile() as tmpfh:
+        db = Connection(tmpfh.name, BLOCKSIZE)
+        db.execute("CREATE TABLE foo (id INT, data BLOB);")
+        for i in range(2):
+            db.execute("INSERT INTO foo VALUES(?, ?)", (i, DUMMY_DATA))
+
+        db.checkpoint()
+        upload_metadata(backend, db, params, incremental=incremental)
+        old_params = params.copy()
+        params.seq_no += 1
+
+        # Grow database
+        for i in range(2, 6):
+            db.execute("INSERT INTO foo VALUES(?, ?)", (i, DUMMY_DATA))
+        db.checkpoint()
+        upload_metadata(backend, db, params)
+        db.close()
+
+    with tempfile.NamedTemporaryFile() as tmpfh:
+        download_metadata(backend, tmpfh.name, old_params)

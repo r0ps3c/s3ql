@@ -46,7 +46,6 @@ class TestCp(t4_fuse.TestFuse):
         self.logfile.close()
 
     def tst_cp(self):
-
         tempdir = tempfile.mkdtemp(prefix='s3ql-cp-')
         try:
             populate_dir(tempdir)
@@ -98,7 +97,7 @@ class TestCp(t4_fuse.TestFuse):
         self.passphrase = None
         self.mkfs()
 
-        # Run monkeypatched mount.s3ql with overriden pyfuse3.invalidate_inode :
+        # Run monkeypatched mount.s3ql with overridden pyfuse3.invalidate_inode :
         # Drop kernel dentries and inodes cache just before calling pyfuse3.invalidate_inode
         cmd = [
             sys.executable,

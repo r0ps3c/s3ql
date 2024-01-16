@@ -28,24 +28,36 @@ from t1_backends import NoTestSection, get_remote_test_info
 from s3ql import backends
 
 
+def Popen_old(*a, **kw):
+    '''Run subprocess.Popen after unsetting PYTHONWARNINGS'''
+
+    # We do not want to see warnings from the old S3QL version when testing
+    # the new one.
+    env = os.environ.copy()
+    env.pop('PYTHONWARNINGS', None)
+
+    return subprocess.Popen(*a, **kw, env=env)
+
+
 @pytest.mark.usefixtures('pass_reg_output')
 class TestUpgrade(t4_fuse.TestFuse):
     def setup_method(self, method):
         skip_without_rsync()
 
-        basedir_old = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 's3ql.old'))
-        if not os.path.exists(os.path.join(basedir_old, 'bin', 'mkfs.s3ql')):
+        self.basedir_old = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), '..', 's3ql.old')
+        )
+        if not os.path.exists(os.path.join(self.basedir_old, 'bin', 'mkfs.s3ql')):
             pytest.skip('no previous S3QL version found')
 
         super().setup_method(method)
-        self.ref_dir = tempfile.mkdtemp(prefix='s3ql-ref-')
-        self.bak_dir = tempfile.mkdtemp(prefix='s3ql-bak-')
-        self.basedir_old = basedir_old
+        self.tempdir = tempfile.mkdtemp(prefix='s3ql-upgrade-test')
+        self.ref_dir = tempfile.mkdtemp(prefix='s3ql-upgrade-ref')
 
     def teardown_method(self, method):
         super().teardown_method(method)
+        shutil.rmtree(self.tempdir)
         shutil.rmtree(self.ref_dir)
-        shutil.rmtree(self.bak_dir)
 
     def mkfs_old(self, force=False, max_obj_size=500):
         argv = [
@@ -65,7 +77,7 @@ class TestUpgrade(t4_fuse.TestFuse):
             argv.append('--force')
         if self.passphrase is None:
             argv.append('--plain')
-        proc = subprocess.Popen(argv, stdin=subprocess.PIPE, universal_newlines=True)
+        proc = Popen_old(argv, stdin=subprocess.PIPE, universal_newlines=True)
 
         if self.backend_login is not None:
             print(self.backend_login, file=proc.stdin)
@@ -81,7 +93,7 @@ class TestUpgrade(t4_fuse.TestFuse):
         )
 
     def mount_old(self):
-        self.mount_process = subprocess.Popen(
+        self.mount_process = Popen_old(
             [
                 os.path.join(self.basedir_old, 'bin', 'mount.s3ql'),
                 "--fg",
@@ -124,7 +136,7 @@ class TestUpgrade(t4_fuse.TestFuse):
                 == 1,
             )
 
-        proc = subprocess.Popen(
+        proc = Popen_old(
             [os.path.join(self.basedir_old, 'bin', 'umount.s3ql'), '--quiet', self.mnt_dir]
         )
         retry(90, lambda: proc.poll() is not None)
@@ -182,8 +194,7 @@ class TestUpgrade(t4_fuse.TestFuse):
     def populate(self):
         populate_dir(self.ref_dir)
 
-    @pytest.mark.parametrize("with_cache", (True, False))
-    def test(self, with_cache):
+    def test(self):
         self.populate()
 
         # Create and mount using previous S3QL version
@@ -192,27 +203,53 @@ class TestUpgrade(t4_fuse.TestFuse):
         subprocess.check_call(['rsync', '-aHAX', self.ref_dir + '/', self.mnt_dir + '/'])
         self.umount_old()
 
-        # Try to access with new version (should fail)
-        if not with_cache:
-            old_cache = self.cache_dir
-            self.cache_dir = tempfile.mkdtemp(prefix='s3ql-cache-')
+        # Preserve a copy of the old cache
+        prev_cache = os.path.join(self.tempdir, 'cache_prev')
+        shutil.copytree(self.cache_dir, prev_cache)
 
+        # Try to access with new version (should fail)
         self.reg_output(r'^ERROR: File system revision too old', count=1)
         self.mount(expect_fail=32)
-        if not with_cache:
-            shutil.rmtree(self.cache_dir)
-            self.cache_dir = old_cache
 
+        # Try to access with new version without cache (should also fail)
+        self.reg_output(r'^ERROR: File system revision too old', count=1)
+        orig_cache = self.cache_dir
+        self.cache_dir = os.path.join(self.tempdir, 'empty-cache')
+        try:
+            self.mount(expect_fail=32)
+        finally:
+            self.cache_dir = orig_cache
+
+        # Upgrade to revision 26 is only supported with populated local cache
         self.upgrade()
 
-        # ...and test
-        if not with_cache:
-            shutil.rmtree(self.cache_dir)
-            self.cache_dir = tempfile.mkdtemp(prefix='s3ql-cache-')
+        # Test with local cache
         self.fsck()
         self.mount()
         self.compare()
         self.umount()
+
+        # Test with old cache
+        orig_cache = self.cache_dir
+        self.cache_dir = prev_cache
+        try:
+            self.fsck()
+            self.mount()
+            self.compare()
+            self.umount()
+        finally:
+            self.cache_dir = orig_cache
+
+        # Test without cache
+        orig_cache = self.cache_dir
+        self.cache_dir = os.path.join(self.tempdir, 'empty-cache2')
+        try:
+            self.fsck()
+            self.mount()
+            self.compare()
+            self.umount()
+        finally:
+            self.cache_dir = orig_cache
 
 
 class TestPlainUpgrade(TestUpgrade):

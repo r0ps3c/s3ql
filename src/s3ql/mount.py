@@ -181,7 +181,6 @@ class Tracer(trio.abc.Instrument):
 
 
 async def main_async(options, stdout_log_handler):
-
     # Get paths
     cachepath = options.cachepath
 
@@ -424,16 +423,14 @@ def get_metadata(backend, cachepath) -> Tuple[FsAttributes, Connection]:
     '''Retrieve metadata'''
 
     db = None
-    local_param = read_cached_params(cachepath)
     param = read_remote_params(backend)
+    local_param = read_cached_params(cachepath, min_seq=param.seq_no)
     if local_param is not None:
-        if local_param.seq_no < param.seq_no:
-            log.info('Ignoring locally cached metadata (outdated).')
-        elif local_param.seq_no > param.seq_no:
+        if local_param.seq_no > param.seq_no:
             raise QuietError("File system not unmounted cleanly, run fsck!", exitcode=30)
-        else:
-            log.info('Using cached metadata.')
-            db = Connection(cachepath + '.db', param.metadata_block_size)
+        log.info('Using cached metadata.')
+        assert local_param == param
+        db = Connection(cachepath + '.db', param.metadata_block_size)
 
     if param.is_mounted:
         raise QuietError(
@@ -449,6 +446,7 @@ def get_metadata(backend, cachepath) -> Tuple[FsAttributes, Connection]:
 
     # Download metadata
     if not db:
+        log.info('Downloading metadata...')
         db = download_metadata(backend, cachepath + '.db', param)
 
         # Drop cache
@@ -693,9 +691,10 @@ class MetadataUploadTask:
                         )
                     )
 
-                # Now upload synchronously to get consistent snapshot (at the cost
-                # of stopping file system operation). As a future optimization, we could
-                # first copy all modified blocks locally, and then upload async...
+                # Now upload synchronously to get consistent snapshot (at the cost of stopping file
+                # system operation). As a future optimization, we could first copy all modified
+                # blocks locally, and then upload async...
+                self.db.checkpoint()
                 self.params.last_modified = time.time()
                 upload_metadata(
                     backend,
@@ -706,7 +705,14 @@ class MetadataUploadTask:
                 )
                 write_params(self.options.cachepath, self.params)
                 upload_params(backend, self.params)
+
+                # Write a new params file immediately, so that we're in the same state as right
+                # after mounting and there is no window where we could have metadata_* objects with
+                # a sequence number for which there is no corresponding s3ql_params_* object.
                 self.params.seq_no += 1
+                write_params(self.options.cachepath, self.params)
+                upload_params(backend, self.params)
+
                 await trio.to_thread.run_sync(expire_objects, backend)
 
         log.debug('finished')

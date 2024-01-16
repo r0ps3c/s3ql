@@ -91,7 +91,7 @@ class cache_tests(unittest.TestCase):
         }
 
         inode = self.cache.create_inode(**attrs)
-        for (key, val) in attrs.items():
+        for key, val in attrs.items():
             self.assertEqual(getattr(inode, key), val)
 
         # Create another inode
@@ -106,22 +106,3 @@ class cache_tests(unittest.TestCase):
             self.cache.create_inode(**attrs)
 
         self.assertRaises(KeyError, self.cache.__getitem__, inode.id)
-
-    def test_filetimes(self):
-
-        for testtime in (0, 2, 2 ** 63):
-
-            attrs = {'mode': 784,
-                    'refcount': 3,
-                    'uid': 7,
-                    'gid': 2,
-                    'size': 34674,
-                    'rdev': 11,
-                    'atime_ns': testtime,
-                    'ctime_ns': testtime,
-                    'mtime_ns': testtime }
-
-            inode = self.cache.create_inode(**attrs)
-
-            for (key, val) in attrs.items():
-                self.assertEqual(getattr(inode, key), val)
