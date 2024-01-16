@@ -14,7 +14,7 @@ classifiers = [
   "Development Status :: 5 - Production/Stable",
   "Environment :: No Input/Output (Daemon)",
   "Environment :: Console",
-  "License :: OSI Approved :: GNU Library or Lesser General Public License (GPLv3)",
+  "License :: OSI Approved :: GNU Lesser General Public License v3 (LGPLv3)",
   "Topic :: Internet",
   "Operating System :: POSIX",
   "Topic :: System :: Archiving",
