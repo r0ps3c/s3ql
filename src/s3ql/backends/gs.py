@@ -19,15 +19,29 @@ from base64 import b64decode, b64encode
 from itertools import count
 from typing import Any, BinaryIO, Dict, Optional
 
-from s3ql.http import (BodyFollowing, CaseInsensitiveDict, ConnectionClosed,
-                       HTTPConnection, HTTPResponse, UnsupportedResponse,
-                       is_temp_network_error)
+from s3ql.http import (
+    BodyFollowing,
+    CaseInsensitiveDict,
+    ConnectionClosed,
+    HTTPConnection,
+    HTTPResponse,
+    UnsupportedResponse,
+    is_temp_network_error,
+)
 
 from ..common import OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, copyfh
 from ..logging import QuietError
-from .common import (AbstractBackend, AuthenticationError, AuthorizationError,
-                     CorruptedObjectError, DanglingStorageURLError,
-                     NoSuchObject, get_proxy, get_ssl_context, retry)
+from .common import (
+    AbstractBackend,
+    AuthenticationError,
+    AuthorizationError,
+    CorruptedObjectError,
+    DanglingStorageURLError,
+    NoSuchObject,
+    get_proxy,
+    get_ssl_context,
+    retry,
+)
 
 try:
     import google.auth as g_auth

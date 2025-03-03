@@ -26,15 +26,28 @@ from urllib.parse import quote, unquote, urlsplit
 from defusedxml import ElementTree
 
 from s3ql.common import copyfh
-from s3ql.http import (BodyFollowing, CaseInsensitiveDict, ConnectionClosed,
-                       HTTPConnection, UnsupportedResponse,
-                       is_temp_network_error)
+from s3ql.http import (
+    BodyFollowing,
+    CaseInsensitiveDict,
+    ConnectionClosed,
+    HTTPConnection,
+    UnsupportedResponse,
+    is_temp_network_error,
+)
 
 from ..logging import QuietError
-from .common import (AbstractBackend, AuthenticationError, AuthorizationError,
-                     CorruptedObjectError, DanglingStorageURLError,
-                     NoSuchObject, checksum_basic_mapping, get_proxy,
-                     get_ssl_context, retry)
+from .common import (
+    AbstractBackend,
+    AuthenticationError,
+    AuthorizationError,
+    CorruptedObjectError,
+    DanglingStorageURLError,
+    NoSuchObject,
+    checksum_basic_mapping,
+    get_proxy,
+    get_ssl_context,
+    retry,
+)
 
 C_DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 C_MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']

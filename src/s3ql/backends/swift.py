@@ -17,14 +17,25 @@ from typing import Any, BinaryIO, Dict, Optional
 from urllib.parse import urlsplit
 
 from s3ql.common import copyfh
-from s3ql.http import (BodyFollowing, CaseInsensitiveDict, ConnectionClosed,
-                       HTTPConnection, is_temp_network_error)
+from s3ql.http import (
+    BodyFollowing,
+    CaseInsensitiveDict,
+    ConnectionClosed,
+    HTTPConnection,
+    is_temp_network_error,
+)
 
 from ..logging import LOG_ONCE, QuietError
 from . import s3c
-from .common import (AbstractBackend, AuthorizationError,
-                     DanglingStorageURLError, NoSuchObject, get_proxy,
-                     get_ssl_context, retry)
+from .common import (
+    AbstractBackend,
+    AuthorizationError,
+    DanglingStorageURLError,
+    NoSuchObject,
+    get_proxy,
+    get_ssl_context,
+    retry,
+)
 from .s3c import BadDigestError, HTTPError, md5sum_b64
 
 log = logging.getLogger(__name__)

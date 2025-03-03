@@ -22,10 +22,8 @@ import cryptography.hazmat.backends as crypto_backends
 import cryptography.hazmat.primitives.ciphers as crypto_ciphers
 
 from .. import BUFSIZE
-from ..common import (ThawError, copyfh, freeze_basic_mapping,
-                      thaw_basic_mapping)
-from .common import (AbstractBackend, CorruptedObjectError,
-                     checksum_basic_mapping)
+from ..common import ThawError, copyfh, freeze_basic_mapping, thaw_basic_mapping
+from .common import AbstractBackend, CorruptedObjectError, checksum_basic_mapping
 
 log = logging.getLogger(__name__)
 

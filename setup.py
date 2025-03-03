@@ -9,17 +9,28 @@ class build(build_orig):
     def finalize_options(self):
         super().finalize_options()
         from Cython.Build import cythonize
-        self.distribution.ext_modules = cythonize([Extension(name='s3ql.sqlite3ext',
-                  sources=["src/s3ql/sqlite3ext.cpp"], libraries=["sqlite3"])], language_level=3)
+
+        self.distribution.ext_modules = cythonize(
+            [
+                Extension(
+                    name='s3ql.sqlite3ext',
+                    sources=["src/s3ql/sqlite3ext.cpp"],
+                    libraries=["sqlite3"],
+                )
+            ],
+            language_level=3,
+        )
+
 
 class sdist(sdist_orig):
     def finalize_options(self):
         super().finalize_options()
         from Cython.Build import cythonize
-        self.distribution.ext_modules = cythonize([Extension(name='s3ql.sqlite3ext',
-                  sources=["src/s3ql/sqlite3ext.pyx"])], language_level=3)
 
-setup(name='s3ql',
-    setup_requires=["cython"],
-    cmdclass={"build": build, "sdist": sdist}
-)
+        self.distribution.ext_modules = cythonize(
+            [Extension(name='s3ql.sqlite3ext', sources=["src/s3ql/sqlite3ext.pyx"])],
+            language_level=3,
+        )
+
+
+setup(name='s3ql', setup_requires=["cython"], cmdclass={"build": build, "sdist": sdist})

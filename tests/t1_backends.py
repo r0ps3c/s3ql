@@ -31,13 +31,11 @@ from pytest import raises as assert_raises
 from pytest_checklogs import assert_logs
 
 from s3ql import BUFSIZE, backends
-from s3ql.backends.common import (AbstractBackend, CorruptedObjectError,
-                                  NoSuchObject)
+from s3ql.backends.common import AbstractBackend, CorruptedObjectError, NoSuchObject
 from s3ql.backends.comprenc import ComprencBackend, ObjectNotEncrypted
 from s3ql.backends.gs import Backend as GSBackend
 from s3ql.backends.local import Backend as LocalBackend
-from s3ql.backends.s3c import (BadDigestError, HTTPError,
-                               OperationAbortedError, S3Error)
+from s3ql.backends.s3c import BadDigestError, HTTPError, OperationAbortedError, S3Error
 from s3ql.http import ConnectionClosed
 
 log = logging.getLogger(__name__)
