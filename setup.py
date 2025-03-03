@@ -1,6 +1,4 @@
-import os
-
-from setuptools import Extension, find_packages, setup
+from setuptools import Extension, setup
 from setuptools.command.build import build as build_orig
 from setuptools.command.sdist import sdist as sdist_orig
 
