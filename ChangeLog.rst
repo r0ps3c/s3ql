@@ -1,7 +1,39 @@
-UNRELEASED
+S3QL 5.2.3 (2024-11-02)
+=======================
+
+* Make release tarballs compatible with Python 3.12 by using a newer Cython version
+  to generate the necessary C++ extension.
+* Minor bugfixes and improvements (see git history for details)
+
+S3QL 5.2.2 (2024-09-01)
+=======================
+
+* Make S3QL's HTTP client library more forgiving when HTTP servers do not behave
+  according to HTTP/1.1 specification. This will make filesystems with
+  OVHcloud's OpenStack Swift implementation more robust.
+
+* Fix a bug where, on a temporary network error, S3QL would immediately retry
+  once and crash if not successful.
+
+S3QL 5.2.1 (2024-07-05)
+======================
+
+* Fixed a crash with `TypeError: CacheEntry.seek() takes 2 positional arguments
+  but 3 were given` when using neither encryption nor compression.
+
+* Fixed a crash with `s3ql.http.StateError: No pending requests`.
+
+S3QL 5.2.0 (2024-04-19)
 =======================
 
 * S3QL now needs Python 3.8+. Python 3.7 is end of life as of 2023-06-27.
+
+* S3QL does not depend on packaging anymore. It was an undocumented dependency
+  for a simple version compare of the Swift backend. This compare is not
+  necessary anymore.
+
+* There is a new s3c4 backend, suitable for storage providers offering an
+  S3 compatible API with v4 signatures.
 
 S3QL 5.1.3 (2023-12-08)
 =======================

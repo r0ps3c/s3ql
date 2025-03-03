@@ -21,25 +21,14 @@ from typing import Any, BinaryIO, Dict, Optional
 from urllib.parse import urlparse
 
 from s3ql.common import copyfh
-from s3ql.http import (
-    BodyFollowing,
-    CaseInsensitiveDict,
-    ConnectionClosed,
-    ConnectionTimedOut,
-    HTTPConnection,
-    is_temp_network_error,
-)
+from s3ql.http import (BodyFollowing, CaseInsensitiveDict, ConnectionClosed,
+                       ConnectionTimedOut, HTTPConnection,
+                       is_temp_network_error)
 
 from ...logging import QuietError
-from ..common import (
-    AbstractBackend,
-    CorruptedObjectError,
-    DanglingStorageURLError,
-    NoSuchObject,
-    checksum_basic_mapping,
-    get_ssl_context,
-    retry,
-)
+from ..common import (AbstractBackend, CorruptedObjectError,
+                      DanglingStorageURLError, NoSuchObject,
+                      checksum_basic_mapping, get_ssl_context, retry)
 from ..s3c import HTTPError
 from .b2_error import B2Error, BadDigestError
 
@@ -517,19 +506,22 @@ class B2Backend(AbstractBackend):
 
         return len_
 
+    # note that delete() ignores missing file errors, the same as s3c::delete()
     def delete(self, key, force=False):
         log.debug('started with %s', key)
+        try:
+            if self.disable_versions:
+                file_id, file_name = self._get_file_id_and_name(key)
+                file_ids = [{'fileName': file_name, 'fileId': file_id}]
+            else:
+                file_ids = self._list_file_versions(key)
 
-        if self.disable_versions:
-            file_id, file_name = self._get_file_id_and_name(key)
-            file_ids = [{'fileName': file_name, 'fileId': file_id}]
-        else:
-            file_ids = self._list_file_versions(key)
-
-        if not file_ids:
-            raise NoSuchObject(key)
-
-        self._delete_file_ids(file_ids, force)
+            if file_ids:
+                self._delete_file_ids(file_ids, force)
+        # also catch and ignore NoSuchObject errors,
+        # from _get_file_id_and_name() --> _do_download_request()
+        except NoSuchObject:
+            pass
 
     @retry
     def _delete_file_ids(self, file_ids, force=False, is_retry=False):

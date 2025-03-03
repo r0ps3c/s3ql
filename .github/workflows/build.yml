@@ -47,6 +47,8 @@ jobs:
         run: |
           apt update
           apt -y install python3-pip python3-venv libsqlite3-dev pkg-config libfuse3-dev rsync fuse psmisc curl
+          python3 -m venv /s3ql-venv --system-site-packages
+          source /s3ql-venv/bin/activate
           pip3 install --ignore-installed build pip setuptools pytest_trio
           cd /work
           python3 -m build
@@ -54,10 +56,12 @@ jobs:
           pip3 wheel -w ./dist -r requirements.txt
           prevver=$(python3 -c 'import s3ql; print("{}".format(s3ql.REV_VER_MAP[s3ql.CURRENT_FS_REV-1]))')
           rm -rf src
-          if curl -sL https://github.com/r0ps3c/s3ql/releases/download/release-${prevver}/s3ql-${prevver}.tar.gz | tar zxf -;
+          if curl -sL https://github.com/s3ql/s3ql/releases/download/release-${prevver}/s3ql-${prevver}.tar.gz | tar zxf -;
           then
             mv s3ql-${prevver} s3ql.old
             cd s3ql.old
+            pip3 install cython dugong
+            python3 setup.py build_cython
             python3 setup.py build_ext --inplace
             cd ..
           fi

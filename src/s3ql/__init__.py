@@ -16,7 +16,7 @@ assert logging.LOG_ONCE  # prevent warnings about unused module
 
 from pyfuse3 import ROOT_INODE
 
-VERSION = '5.1.3+rp1'
+VERSION = '5.2.3+rp1'
 RELEASE = '%s' % VERSION
 
 # When bumping this up, figure out how database.py's expire_objects() should deal with older

@@ -24,30 +24,17 @@ from typing import Any, BinaryIO, Dict, Optional
 from urllib.parse import quote, unquote, urlsplit
 
 from defusedxml import ElementTree
-from s3ql.http import (
-    BodyFollowing,
-    CaseInsensitiveDict,
-    ConnectionClosed,
-    HTTPConnection,
-    UnsupportedResponse,
-    is_temp_network_error,
-)
 
 from s3ql.common import copyfh
+from s3ql.http import (BodyFollowing, CaseInsensitiveDict, ConnectionClosed,
+                       HTTPConnection, UnsupportedResponse,
+                       is_temp_network_error)
 
 from ..logging import QuietError
-from .common import (
-    AbstractBackend,
-    AuthenticationError,
-    AuthorizationError,
-    CorruptedObjectError,
-    DanglingStorageURLError,
-    NoSuchObject,
-    checksum_basic_mapping,
-    get_proxy,
-    get_ssl_context,
-    retry,
-)
+from .common import (AbstractBackend, AuthenticationError, AuthorizationError,
+                     CorruptedObjectError, DanglingStorageURLError,
+                     NoSuchObject, checksum_basic_mapping, get_proxy,
+                     get_ssl_context, retry)
 
 C_DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 C_MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -146,9 +133,10 @@ class Backend(AbstractBackend):
 
     def is_temp_failure(self, exc):  # IGNORE:W0613
         if is_temp_network_error(exc) or isinstance(exc, ssl.SSLError):
-            # We probably can't use the connection anymore, so use this
-            # opportunity to reset it
-            self.conn.reset()
+            # We probably can't use the connection anymore, so disconnect (can't use reset, since
+            # this would immediately attempt to reconnect, circumventing retry logic)
+            self.conn.disconnect()
+            return True
 
         if isinstance(
             exc,
@@ -165,9 +153,6 @@ class Backend(AbstractBackend):
         ):
             return True
 
-        elif is_temp_network_error(exc):
-            return True
-
         # In doubt, we retry on 5xx (Server error). However, there are some
         # codes where retry is definitely not desired. For 4xx (client error) we
         # do not retry in general, but for 408 (Request Timeout) RFC 2616
@@ -177,14 +162,6 @@ class Backend(AbstractBackend):
             (500 <= exc.status <= 599 and exc.status not in (501, 505, 508, 510, 511, 523))
             or exc.status in (408, 429)
         ):
-            return True
-
-        # Consider all SSL errors as temporary. There are a lot of bug
-        # reports from people where various SSL errors cause a crash
-        # but are actually just temporary. On the other hand, we have
-        # no information if this ever revealed a problem where retrying
-        # was not the right choice.
-        elif isinstance(exc, ssl.SSLError):
             return True
 
         return False
@@ -389,7 +366,7 @@ class Backend(AbstractBackend):
         off = fh.tell()
         if len_ is None:
             fh.seek(0, os.SEEK_END)
-            len_ = fh.tell()
+            len_ = fh.tell() - off
         return self._write_fh(key, fh, off, len_, metadata or {})
 
     @retry

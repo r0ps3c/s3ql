@@ -19,29 +19,15 @@ from base64 import b64decode, b64encode
 from itertools import count
 from typing import Any, BinaryIO, Dict, Optional
 
-from s3ql.http import (
-    BodyFollowing,
-    CaseInsensitiveDict,
-    ConnectionClosed,
-    HTTPConnection,
-    HTTPResponse,
-    UnsupportedResponse,
-    is_temp_network_error,
-)
+from s3ql.http import (BodyFollowing, CaseInsensitiveDict, ConnectionClosed,
+                       HTTPConnection, HTTPResponse, UnsupportedResponse,
+                       is_temp_network_error)
 
 from ..common import OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, copyfh
 from ..logging import QuietError
-from .common import (
-    AbstractBackend,
-    AuthenticationError,
-    AuthorizationError,
-    CorruptedObjectError,
-    DanglingStorageURLError,
-    NoSuchObject,
-    get_proxy,
-    get_ssl_context,
-    retry,
-)
+from .common import (AbstractBackend, AuthenticationError, AuthorizationError,
+                     CorruptedObjectError, DanglingStorageURLError,
+                     NoSuchObject, get_proxy, get_ssl_context, retry)
 
 try:
     import google.auth as g_auth
@@ -255,9 +241,9 @@ class Backend(AbstractBackend):
 
     def is_temp_failure(self, exc):  # IGNORE:W0613
         if is_temp_network_error(exc) or isinstance(exc, ssl.SSLError):
-            # We probably can't use the connection anymore, so use this
-            # opportunity to reset it
-            self.conn.reset()
+            # We probably can't use the connection anymore, so disconnect (can't use reset, since
+            # this would immediately attempt to reconnect, circumventing retry logic)
+            self.conn.disconnect()
             return True
 
         elif isinstance(exc, RequestError) and (500 <= exc.code <= 599 or exc.code == 408):
@@ -423,7 +409,7 @@ class Backend(AbstractBackend):
         off = fh.tell()
         if len_ is None:
             fh.seek(0, os.SEEK_END)
-            len_ = fh.tell()
+            len_ = fh.tell() - off
         return self._write_fh(key, fh, off, len_, metadata or {})
 
     @retry
