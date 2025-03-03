@@ -23,7 +23,7 @@ jobs:
       aname: ${{ steps.aname.outputs.artifactname }}
       version: ${{ steps.getversion.outputs.version }}
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     - id: getversion
       shell: python
       run: |
@@ -67,7 +67,7 @@ jobs:
           fi
           pytest tests
     - id: upload
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{github.sha}}
         path: ${{github.workspace}}/dist/s3ql-${{ steps.getversion.outputs.version }}.tar.gz
